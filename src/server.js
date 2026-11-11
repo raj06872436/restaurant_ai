@@ -121,6 +121,21 @@ function createApp({
   app.post('/api/tables/:table/order', need('floor'), wrap(req => r.placeOrder(req.params.table, req.body.items)));
   app.post('/api/tables/:table/payments/:pid/confirm', need('floor'), wrap(req => r.confirmPayment(req.params.table, req.params.pid, by(req))));
   app.post('/api/orders/:id/advance', need('kitchen'), wrap(req => r.advanceOrder(req.params.id, req.body.status, by(req))));
+  app.post('/api/tables/:table/move', need('floor'), wrap(req => r.moveTable(req.params.table, String(req.body.to || '').toUpperCase(), by(req))));
+  app.post('/api/tables/:table/join', need('floor'), wrap(req => r.joinTables(req.params.table, String(req.body.into || '').toUpperCase(), by(req))));
+  app.post('/api/tables/:table/discount', need('floor'), wrap(req => r.setDiscount(req.params.table, req.body, req.member)));
+  app.post('/api/orders/:id/cancel', need('kitchen'), wrap(req => r.cancelItem(req.params.id, req.body.item, req.body.qty, req.body.reason, by(req))));
+  app.get('/api/orders/:id', need('kitchen'), wrap(req => {
+    const o = r.d.orders.find(x => x.id === req.params.id);
+    if (!o) throw httpError(404, 'Order not found');
+    return { order: o, settings: { name: r.d.settings.name } };
+  }));
+  app.get('/api/tables/:table/bill', need('floor'), wrap(req => {
+    const t = r.table(req.params.table), v = r.visit(t.visitId);
+    if (!v) throw httpError(400, 'There is no open bill for this table.');
+    const s = r.d.settings;
+    return { table: t.id, tables: r.d.tables.filter(x => x.visitId === v.id).map(x => x.id), visit: { id: v.id, guests: v.guests, seatedAt: v.seatedAt, payments: v.payments.filter(p => !p.pending) }, bill: r.billFor(v), settings: { name: s.name, address: s.address || '', currency: s.currency, gst: s.gst || null }, now: r.now() };
+  }));
   app.get('/api/stats', need('owner'), wrap(() => r.stats()));
   app.get('/api/report', need('owner'), wrap(req => r.report(req.query.date)));
   app.get('/api/report.csv', need('owner'), (req, res) => {
@@ -165,6 +180,8 @@ function createApp({
   app.get('/owner', page('owner.html'));
   app.get('/qr', page('qr.html'));
   app.get('/settings', page('settings.html'));
+  app.get('/print/bill/:table', page('print-bill.html'));
+  app.get('/print/kot/:id', page('print-kot.html'));
   app.get('/', (req, res) => res.redirect('/staff'));
   app.use('/photos', express.static(photoDir, { maxAge: '7d' }));
   app.use(express.static(path.join(__dirname, '..', 'public')));

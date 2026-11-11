@@ -1,0 +1,12 @@
+/* 80 mm thermal receipt. Also fine on A4: it just prints a narrow column. */
+body{margin:0;background:#fff;color:#000;font:13px/1.35 ui-monospace,"JetBrains Mono",Menlo,monospace}
+.slip{width:72mm;margin:0 auto;padding:4mm 0}
+.c{text-align:center}.r{text-align:right;white-space:nowrap;padding-left:8px}.b{font-weight:700}
+h1{font-size:16px;margin:0 0 2px}
+hr{border:0;border-top:1px dashed #000;margin:6px 0}
+table{width:100%;border-collapse:collapse}td{padding:1px 0;vertical-align:top}
+.big{font-size:18px}
+.noprint{text-align:center;margin:12px}
+.noprint button{font:inherit;padding:8px 16px}
+@page{size:80mm auto;margin:0}
+@media print{.noprint{display:none}}
