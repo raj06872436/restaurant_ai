@@ -1,0 +1,22 @@
+# Start everything:   docker compose up -d
+# Without cameras:    docker compose up -d app
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports: ["3000:3000"]
+    environment:
+      STAFF_PIN: ${STAFF_PIN:-1234}
+      CAMERA_KEY: ${CAMERA_KEY:-change-me-camera-key}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+    volumes: ["tablesense-data:/app/data"]  # orders, menu, settings and dish photos
+
+  camera:
+    build: ./camera
+    restart: unless-stopped
+    depends_on: [app]
+    # tables.json must use "server": "http://app:3000" and the same CAMERA_KEY as above
+    volumes: ["./camera/tables.json:/config/tables.json:ro", "./camera/models:/root/.config/Ultralytics"]
+
+volumes:
+  tablesense-data:

@@ -17,7 +17,19 @@ Joining them gives alerts neither can give alone:
 
 The owner dashboard shows sales, tips, tables in use, guests per hour, average minutes from sitting down to ordering, average time per table, top dishes, and how often guests were left waiting.
 
-## Run it
+## Run it with Docker (easiest)
+
+On the restaurant's computer or a small server:
+
+```bash
+cp .env.example .env      # set STAFF_PIN, CAMERA_KEY and PUBLIC_URL
+docker compose up -d app  # the app only
+docker compose up -d      # app + camera connector (needs camera/tables.json, see below)
+```
+
+Orders, menu, settings and dish photos are kept in the `tablesense-data` Docker volume.
+
+## Run it without Docker
 
 Needs Node.js 18 or newer.
 
@@ -32,7 +44,9 @@ Then open:
 - `http://localhost:3000/kitchen` kitchen screen
 - `http://localhost:3000/owner` owner dashboard
 - `http://localhost:3000/qr` printable QR codes, one per table
-- `http://localhost:3000/settings` menu editor (add dishes, change prices, mark veg, hide a dish when it runs out) and restaurant settings (name, currency, Wi-Fi, alert times, ways to pay, tables)
+- `http://localhost:3000/settings` menu editor (add dishes, photos, Hindi names, prices, veg marks, hide a dish when it runs out) and restaurant settings (name, currency, Wi-Fi, alert times, ways to pay, tables)
+
+Guests can switch the menu between English and Hindi. Dishes show their Hindi name when one is set.
 
 Staff pages ask for the PIN (default `1234`). Each QR code carries a secret key for its own table, so a guest can only order for the table they're sitting at.
 
@@ -81,6 +95,7 @@ npm test
 ## Not built yet
 
 - Automatic payment confirmation through a gateway (for example Razorpay). Today staff confirm each payment by hand.
-- Photos per dish, and a Hindi/English toggle.
+- Translating staff screens (only the guest app has Hindi so far).
+- The Docker files haven't been run yet (no Docker in the build environment). The app itself is tested.
 - Multiple restaurants or branches, user accounts per waiter, and a real database (the JSON file is fine for one branch).
 - The camera connector has not been run against a live CCTV feed yet. Expect to tune the zones and the confidence threshold on site.

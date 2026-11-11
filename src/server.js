@@ -1,3 +1,4 @@
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const http = require('http');
@@ -16,6 +17,7 @@ function createApp({
   now,
 } = {}) {
   const store = new Store(dataFile);
+  const photoDir = path.join(dataFile ? path.dirname(dataFile) : require('os').tmpdir(), 'photos');
   const r = new Restaurant(store, now);
   const app = express();
   const server = http.createServer(app);
@@ -86,6 +88,15 @@ function createApp({
   app.post('/api/orders/:id/advance', staffOnly, wrap(req => r.advanceOrder(req.params.id, req.body.status)));
   app.get('/api/stats', staffOnly, wrap(() => r.stats()));
   app.put('/api/menu', staffOnly, wrap(req => r.setMenu(req.body.menu)));
+  const PHOTO_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+  app.post('/api/menu/photo', staffOnly, express.raw({ type: Object.keys(PHOTO_TYPES), limit: '3mb' }), wrap(req => {
+    const ext = PHOTO_TYPES[req.get('content-type')];
+    if (!ext || !Buffer.isBuffer(req.body) || !req.body.length) throw httpError(400, 'Choose a JPG, PNG or WebP photo under 3 MB.');
+    const name = crypto.randomBytes(8).toString('hex') + '.' + ext;
+    fs.mkdirSync(photoDir, { recursive: true });
+    fs.writeFileSync(path.join(photoDir, name), req.body);
+    return { url: '/photos/' + name };
+  }));
   app.put('/api/settings', staffOnly, wrap(req => r.updateSettings(req.body)));
   app.get('/api/qr/:table.svg', staffOnly, async (req, res) => {
     try {
@@ -94,6 +105,8 @@ function createApp({
       res.type('image/svg+xml').send(await QRCode.toString(`${base}/t/${t.id}?k=${t.key}`, { type: 'svg', margin: 1 }));
     } catch (e) { res.status(e.status || 500).send(e.message); }
   });
+
+  app.use('/api', (err, req, res, next) => res.status(err.status || 500).json({ error: err.type === 'entity.too.large' ? 'That file is too big. Use a photo under 3 MB.' : 'Something went wrong.' }));
 
   /* ---------- pages ---------- */
   const page = f => (req, res) => res.sendFile(path.join(__dirname, '..', 'public', f));
@@ -104,6 +117,7 @@ function createApp({
   app.get('/qr', page('qr.html'));
   app.get('/settings', page('settings.html'));
   app.get('/', (req, res) => res.redirect('/staff'));
+  app.use('/photos', express.static(photoDir, { maxAge: '7d' }));
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
   /* ---------- live updates ---------- */
