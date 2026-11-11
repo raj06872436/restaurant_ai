@@ -46,7 +46,7 @@ const WORDS = {
     wifi: 'Guest Wi-Fi', copy: 'Copy password', copied: 'Password copied.',
     payUpi: a => `Pay ${a} by UPI`, openUpi: 'Open UPI app', upiHelp: 'On this phone tap the button. On another phone scan the code. Staff will confirm when it arrives.', done: 'Done',
     billLater: 'Your bill will show here after you order.', confirming: 'Payment sent. Staff are confirming it.', paid: 'Paid in full. Thank you!',
-    totalTip: (t, tip) => `Total ${t}${tip ? `, tip ${tip}` : ''}.`, total: 'Total', already: 'Already paid', left: 'Left to pay',
+    totalTip: (t, tip) => `Total ${t}${tip ? `, tip ${tip}` : ''}.`, total: 'Total', subtotal: 'Subtotal', disc: 'Discount', already: 'Already paid', left: 'Left to pay',
     split: 'Split', whole: 'Whole bill', ways: n => `${n} ways`, tip: 'Tip', payWith: 'Pay with', share: 'Your share', toPay: 'To pay',
     how: { cash: 'A waiter will come to collect it.', card: 'A waiter will bring the card machine.', upi: 'You will get a UPI link and QR code to pay from any UPI app.', bank: 'Staff will confirm when your transfer arrives.' },
     pay: a => `Pay ${a}`, waiterOnWay: 'A waiter is on the way.', sent: 'Order sent to the kitchen.',
@@ -62,7 +62,7 @@ const WORDS = {
     wifi: 'मेहमान Wi-Fi', copy: 'पासवर्ड कॉपी करें', copied: 'पासवर्ड कॉपी हो गया।',
     payUpi: a => `UPI से ${a} भुगतान करें`, openUpi: 'UPI ऐप खोलें', upiHelp: 'इसी फ़ोन पर बटन दबाएं। दूसरे फ़ोन से कोड स्कैन करें। पैसे मिलने पर स्टाफ़ पुष्टि करेगा।', done: 'हो गया',
     billLater: 'ऑर्डर के बाद आपका बिल यहाँ दिखेगा।', confirming: 'भुगतान भेजा गया। स्टाफ़ पुष्टि कर रहा है।', paid: 'पूरा भुगतान हो गया। धन्यवाद!',
-    totalTip: (t, tip) => `कुल ${t}${tip ? `, टिप ${tip}` : ''}।`, total: 'कुल', already: 'पहले से भुगतान', left: 'बाकी भुगतान',
+    totalTip: (t, tip) => `कुल ${t}${tip ? `, टिप ${tip}` : ''}।`, total: 'कुल', subtotal: 'उप-योग', disc: 'छूट', already: 'पहले से भुगतान', left: 'बाकी भुगतान',
     split: 'बिल बाँटें', whole: 'पूरा बिल', ways: n => `${n} हिस्से`, tip: 'टिप', payWith: 'भुगतान का तरीका', share: 'आपका हिस्सा', toPay: 'भुगतान',
     how: { cash: 'वेटर नकद लेने आएंगे।', card: 'वेटर कार्ड मशीन लाएंगे।', upi: 'आपको किसी भी UPI ऐप से भुगतान के लिए लिंक और QR कोड मिलेगा।', bank: 'ट्रांसफ़र मिलने पर स्टाफ़ पुष्टि करेगा।' },
     pay: a => `${a} भुगतान करें`, waiterOnWay: 'वेटर आ रहे हैं।', sent: 'ऑर्डर किचन भेज दिया गया।',
@@ -144,6 +144,9 @@ function render() {
     else {
       const share = shareOf(bill), shareTip = Math.round(share * tip / 100);
       h += `<div class="box">${bill.lines.map(l => `<div class="row"><span>${esc(lineName(l))} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></div>`).join('')}
+        ${bill.discount || (bill.tax && bill.tax.added) ? `<div class="row"><span>${w.subtotal}</span><span class="num">${money(bill.subtotal)}</span></div>` : ''}
+        ${bill.discount ? `<div class="row"><span>${w.disc}</span><span class="num">− ${money(bill.discount)}</span></div>` : ''}
+        ${bill.tax && bill.tax.added ? `<div class="row"><span>GST ${bill.tax.rate}%</span><span class="num">${money(bill.tax.added)}</span></div>` : ''}
         <div class="row"><b>${w.total}</b><b class="num">${money(bill.total)}</b></div>${bill.paid ? `<div class="row"><span>${w.already}</span><span class="num">− ${money(bill.paid)}</span></div><div class="row"><b>${w.left}</b><b>${money(bill.due)}</b></div>` : ''}</div>
         <span class="tag">${w.split}</span><div class="chips">${[1, 2, 3, 4, 5, 6].map(n => `<button class="chip ${split === n ? 'sel' : ''}" data-split="${n}">${n === 1 ? w.whole : w.ways(n)}</button>`).join('')}</div>
         <span class="tag">${w.tip}</span><div class="chips">${[0, 5, 10, 15].map(n => `<button class="chip ${tip === n ? 'sel' : ''}" data-tip="${n}">${n}%</button>`).join('')}</div>

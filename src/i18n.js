@@ -23,6 +23,19 @@ const EXACT = {
   'Payment not found': 'भुगतान नहीं मिला',
   'Something went wrong.': 'कुछ गड़बड़ हो गई।',
   'Pick a valid date.': 'सही तारीख चुनें।',
+  'Pick a different table.': 'कोई दूसरी टेबल चुनें।',
+  'Both tables need guests to join their bills.': 'बिल जोड़ने के लिए दोनों टेबल पर मेहमान होने चाहिए।',
+  'These tables already share a bill.': 'इन टेबल का बिल पहले से एक है।',
+  'That dish is not in this order.': 'यह डिश इस ऑर्डर में नहीं है।',
+  'Give a reason for cancelling.': 'रद्द करने का कारण लिखें।',
+  'This bill is already paid. Refund the guest instead of cancelling.': 'बिल का भुगतान हो चुका है। रद्द करने के बजाय पैसे लौटाएं।',
+  'This bill is already paid. Refund the guest instead.': 'बिल का भुगतान हो चुका है। पैसे लौटाएं।',
+  'Enter a discount.': 'छूट डालें।',
+  'A discount can be at most 100%.': 'छूट 100% से ज़्यादा नहीं हो सकती।',
+  'Give a reason for the discount.': 'छूट का कारण लिखें।',
+  'GST rate must be 0, 5, 12, 18 or 28%.': 'GST दर 0, 5, 12, 18 या 28% होनी चाहिए।',
+  'GSTIN should be 15 letters and numbers.': 'GSTIN 15 अक्षर और अंकों का होना चाहिए।',
+  'Waiter discount limit must be between 0 and 100%.': 'वेटर की छूट सीमा 0 से 100% के बीच होनी चाहिए।',
 };
 const PATTERNS = [
   [/^"(.+)" is not on the menu\.$/, m => `"${m[1]}" मेन्यू में नहीं है।`],
@@ -38,6 +51,9 @@ const PATTERNS = [
   [/^Only (.+) is left to pay\.$/, m => `सिर्फ़ ${m[1]} भुगतान बाकी है।`],
   [/^Table (.+) is listed twice\.$/, m => `टेबल ${m[1]} दो बार लिखी है।`],
   [/^There are two people called (.+)\. Use different names\.$/, m => `${m[1]} नाम के दो लोग हैं। अलग नाम लिखें।`],
+  [/^(.+) has no guests to move\.$/, m => `${m[1]} पर कोई मेहमान नहीं है।`],
+  [/^(.+) already has guests\. Join the bills instead\.$/, m => `${m[1]} पर पहले से मेहमान हैं। बिल जोड़ें।`],
+  [/^Waiters can give up to (.+)% off\. Ask the owner for more\.$/, m => `वेटर ${m[1]}% तक छूट दे सकते हैं। ज़्यादा के लिए मालिक से पूछें।`],
   [/^No table called (.+)$/, m => `${m[1]} नाम की कोई टेबल नहीं है`],
 ];
 

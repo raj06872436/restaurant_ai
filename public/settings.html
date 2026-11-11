@@ -62,6 +62,12 @@ function render() {
         <fieldset><legend>${w.wifi}</legend><div class="grid2">
           <label>${w.network}<input id="s-net" type="text" value="${esc(s.wifi.network)}"></label>
           <label>${w.password}<input id="s-pass" type="text" value="${esc(s.wifi.password)}"></label></div></fieldset>
+        <label>${w.address}<input id="s-addr" type="text" maxlength="140" value="${esc(s.address || '')}"></label>
+        <fieldset><legend>${w.gstSet}</legend><div class="grid2">
+          <label>${w.gstRate}<select id="s-gst">${[0, 5, 12, 18, 28].map(r => `<option value="${r}" ${(s.gst ? s.gst.rate : 0) === r ? 'selected' : ''}>${r}%</option>`).join('')}</select></label>
+          <label>${w.gstin}<input id="s-gstin" type="text" maxlength="15" value="${esc(s.gst ? s.gst.gstin : '')}"></label></div>
+          <label class="check"><input type="checkbox" id="s-gstincl" ${s.gst && s.gst.inclusive ? 'checked' : ''}> ${w.gstIncl}</label>
+          <label>${w.waiterDisc}<input id="s-wdisc" type="number" min="0" max="100" value="${s.waiterDiscountMaxPct ?? 10}"></label></fieldset>
         <fieldset><legend>${w.alertsSet}</legend><div class="grid2">
           <label>${w.waitMin}<input id="s-wait" type="number" min="1" max="60" value="${s.noOrderAlertMin}"></label>
           <label>${w.readyMin}<input id="s-ready" type="number" min="1" max="60" value="${s.readyNotServedAlertMin}"></label></div></fieldset>
@@ -159,6 +165,8 @@ document.addEventListener('submit', async e => {
   try {
     await api('/api/settings', { method: 'PUT', body: {
       name: v('s-name'), currency: v('s-cur'), wifi: { network: v('s-net'), password: v('s-pass') },
+      address: v('s-addr'), gst: { rate: Number(v('s-gst')), gstin: v('s-gstin'), inclusive: document.getElementById('s-gstincl').checked },
+      waiterDiscountMaxPct: Number(v('s-wdisc')),
       noOrderAlertMin: Number(v('s-wait')), readyNotServedAlertMin: Number(v('s-ready')),
       payments: { methods: METHODS.filter(id => document.getElementById('pm-' + id).checked), upi: { vpa: v('s-vpa'), payee: v('s-payee') } },
       tables: tables.map(t => ({ id: t.id, seats: t.seats })),
