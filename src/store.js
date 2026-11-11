@@ -22,7 +22,7 @@ function defaults(tableCount = 8) {
     tables.push({ id: 'T' + i, seats: i % 3 ? 4 : 2, state: 'free', people: 0, visitId: null, since: Date.now(), waiterSeenAt: null, key: crypto.randomBytes(6).toString('hex') });
   }
   return {
-    settings: { name: 'My Restaurant', currency: 'Rs', noOrderAlertMin: 5, readyNotServedAlertMin: 3, wifi: { network: 'Table-Guest', password: 'welcome123' }, payments: { methods: ['cash', 'card', 'upi', 'bank'], upi: { vpa: '', payee: '' } } },
+    settings: { name: 'My Restaurant', currency: 'Rs', noOrderAlertMin: 5, readyNotServedAlertMin: 3, wifi: { network: 'Table-Guest', password: 'welcome123' }, payments: { methods: ['online', 'cash', 'card', 'upi', 'bank'], upi: { vpa: '', payee: '' } } },
     tables, menu: DEFAULT_MENU, visits: [], orders: [], alerts: [], seq: 1,
   };
 }

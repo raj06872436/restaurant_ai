@@ -23,6 +23,9 @@ const EXACT = {
   'Payment not found': 'भुगतान नहीं मिला',
   'Something went wrong.': 'कुछ गड़बड़ हो गई।',
   'Pick a valid date.': 'सही तारीख चुनें।',
+  'Online payment is not set up.': 'ऑनलाइन भुगतान चालू नहीं है।',
+  'Online payment is not available right now. Pay another way or call a waiter.': 'ऑनलाइन भुगतान अभी उपलब्ध नहीं है। दूसरे तरीके से भुगतान करें या वेटर बुलाएं।',
+  "We couldn't confirm this payment. If money was taken, show a waiter the message from your bank.": 'हम इस भुगतान की पुष्टि नहीं कर पाए। अगर पैसा कट गया है, तो वेटर को बैंक का मैसेज दिखाएं।',
 };
 const PATTERNS = [
   [/^"(.+)" is not on the menu\.$/, m => `"${m[1]}" मेन्यू में नहीं है।`],
