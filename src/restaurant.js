@@ -3,6 +3,7 @@
 const EventEmitter = require('events');
 
 const MIN = 60 * 1000;
+const METHOD_LABEL = { cash: 'Cash', card: 'Card', upi: 'UPI', bank: 'Bank transfer', wallet: 'Wallet' };
 
 class Restaurant extends EventEmitter {
   constructor(store, now = () => Date.now()) {
@@ -145,7 +146,8 @@ class Restaurant extends EventEmitter {
       lines[l.id] = lines[l.id] || { name: l.name, price: l.price, qty: 0 };
       lines[l.id].qty += l.qty;
     }
-    return { total, paid, tips, due: Math.max(0, total - paid), lines: Object.values(lines) };
+    const unconfirmed = v.payments.filter(p => !p.confirmed).reduce((a, p) => a + p.amount + (p.tip || 0), 0);
+    return { total, paid, tips, unconfirmed, due: Math.max(0, total - paid), lines: Object.values(lines) };
   }
   pay(tableId, { amount, tip = 0, method }) {
     const t = this.table(tableId);
@@ -155,14 +157,15 @@ class Restaurant extends EventEmitter {
     amount = Math.round(Number(amount)); tip = Math.max(0, Math.round(Number(tip) || 0));
     if (!(amount > 0)) throw httpError(400, 'Enter an amount to pay.');
     if (amount > bill.due) throw httpError(400, `Only ${this.money(bill.due)} is left to pay.`);
-    const methods = ['cash', 'card', 'bank', 'wallet'];
-    if (!methods.includes(method)) throw httpError(400, 'Choose how you are paying.');
-    // Cash and card at table need a waiter; online methods would go through a payment gateway (not wired yet).
+    if (!this.paymentMethods().includes(method)) throw httpError(400, 'Choose how you are paying.');
+    // Cash and card are collected by a waiter. UPI and bank transfer go straight to the restaurant's account;
+    // staff confirm when the money shows up. A gateway with automatic confirmation can replace this later.
     const p = { id: this.store.id('P'), amount, tip, method, at: this.now(), confirmed: false };
+    if (method === 'upi') p.upiLink = this.upiLink(amount + tip, `${t.id} ${p.id}`);
     v.payments.push(p);
     const left = bill.due - amount;
     if (left === 0) v.paidAt = this.now();
-    this.raise(t.id, 'payment', `${t.id} is paying ${this.money(amount + tip)} by ${method}. Confirm the payment.`, 'guest app');
+    this.raise(t.id, 'payment', `${t.id} is paying ${this.money(amount + tip)} by ${METHOD_LABEL[method] || method}. Confirm the payment.`, 'guest app');
     this.changed();
     return { payment: p, due: left };
   }
@@ -174,6 +177,70 @@ class Restaurant extends EventEmitter {
     if (v.payments.every(x => x.confirmed)) this.resolve(v.tableId, ['payment'], 'staff');
     this.changed();
     return p;
+  }
+
+  paymentMethods() {
+    const pay = this.d.settings.payments || { methods: ['cash', 'card'] };
+    return pay.methods.filter(m => m !== 'upi' || (pay.upi && pay.upi.vpa));
+  }
+  upiLink(amount, note) {
+    const { vpa, payee } = this.d.settings.payments.upi;
+    const q = new URLSearchParams({ pa: vpa, pn: payee || this.d.settings.name, am: Number(amount).toFixed(2), cu: 'INR', tn: `${this.d.settings.name} ${note}`.slice(0, 50) });
+    return 'upi://pay?' + q.toString().replace(/\+/g, '%20');
+  }
+
+  /* ---------- owner settings ---------- */
+  updateSettings(patch = {}) {
+    const s = this.d.settings;
+    const text = (v, max = 60) => String(v ?? '').trim().slice(0, max);
+    const mins = (v, name) => { const n = Number(v); if (!(n >= 1 && n <= 60)) throw httpError(400, `${name} must be between 1 and 60 minutes.`); return n; };
+    if ('name' in patch) { if (!text(patch.name)) throw httpError(400, 'Enter the restaurant name.'); s.name = text(patch.name); }
+    if ('currency' in patch) s.currency = text(patch.currency, 5) || 'Rs';
+    if (patch.wifi) s.wifi = { network: text(patch.wifi.network), password: text(patch.wifi.password) };
+    if ('noOrderAlertMin' in patch) s.noOrderAlertMin = mins(patch.noOrderAlertMin, 'The no-order alert');
+    if ('readyNotServedAlertMin' in patch) s.readyNotServedAlertMin = mins(patch.readyNotServedAlertMin, 'The food-ready alert');
+    if (patch.payments) {
+      const methods = (patch.payments.methods || []).filter(m => Object.keys(METHOD_LABEL).includes(m));
+      if (!methods.length) throw httpError(400, 'Turn on at least one way to pay.');
+      const vpa = text(patch.payments.upi && patch.payments.upi.vpa, 80);
+      if (methods.includes('upi') && !/^[\w.\-]{2,}@[a-zA-Z][\w.\-]*$/.test(vpa)) throw httpError(400, 'Enter a valid UPI ID, like restaurant@okhdfcbank.');
+      s.payments = { methods, upi: { vpa, payee: text(patch.payments.upi && patch.payments.upi.payee) } };
+    }
+    if (Array.isArray(patch.tables)) this.setTables(patch.tables);
+    this.changed();
+    return s;
+  }
+  setTables(list) {
+    const ids = new Set();
+    const next = list.map(x => {
+      const id = text(x.id).toUpperCase();
+      if (!/^[A-Z0-9-]{1,8}$/.test(id)) throw httpError(400, `"${x.id}" is not a valid table name. Use letters and numbers, like T9.`);
+      if (ids.has(id)) throw httpError(400, `Table ${id} is listed twice.`);
+      ids.add(id);
+      const old = this.d.tables.find(t => t.id === id);
+      const seats = Math.min(30, Math.max(1, Number(x.seats) || 4));
+      return old ? { ...old, seats } : { id, seats, state: 'free', people: 0, visitId: null, since: this.now(), waiterSeenAt: null, key: require('crypto').randomBytes(6).toString('hex') };
+    });
+    if (!next.length) throw httpError(400, 'Keep at least one table.');
+    for (const t of this.d.tables) if (!ids.has(t.id) && t.visitId) throw httpError(400, `${t.id} has guests right now, so it can't be removed.`);
+    this.d.tables = next;
+    function text(v) { return String(v ?? '').trim(); }
+  }
+  setMenu(menu) {
+    if (!Array.isArray(menu)) throw httpError(400, 'Send the full menu list.');
+    const ids = new Set();
+    this.d.menu = menu.map(m => {
+      const name = String(m.name || '').trim().slice(0, 60);
+      if (!name) throw httpError(400, 'Every dish needs a name.');
+      let id = String(m.id || '').trim() || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'dish';
+      while (ids.has(id)) id += '-2';
+      ids.add(id);
+      const price = Math.round(Number(m.price));
+      if (!(price >= 0)) throw httpError(400, `Enter a price for ${name}.`);
+      return { id, cat: String(m.cat || 'Other').trim().slice(0, 30) || 'Other', name, desc: String(m.desc || '').trim().slice(0, 140), price, hidden: !!m.hidden, veg: !!m.veg };
+    });
+    this.changed();
+    return this.d.menu;
   }
 
   /* ---------- kitchen ---------- */
@@ -254,6 +321,7 @@ class Restaurant extends EventEmitter {
     return {
       table: { id: t.id, state: t.state }, restaurant: this.d.settings.name, currency: this.d.settings.currency, wifi: this.d.settings.wifi,
       menu: this.d.menu.filter(m => !m.hidden), orders, bill: v ? this.billFor(v) : null,
+      payMethods: this.paymentMethods().map(m => ({ id: m, label: METHOD_LABEL[m] })),
       waiterCalled: this.d.alerts.some(a => !a.doneAt && a.tableId === t.id && (a.kind === 'call' || a.kind === 'bill')),
     };
   }
@@ -273,4 +341,4 @@ function avg(a) { return a.length ? Math.round((a.reduce((x, y) => x + y, 0) / a
 function startOfDay(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); }
 function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
 
-module.exports = { Restaurant, httpError, MIN };
+module.exports = { Restaurant, httpError, MIN, METHOD_LABEL };

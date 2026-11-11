@@ -51,7 +51,7 @@ test('full visit: order, kitchen, pay, leave, clean', () => {
   const half = Math.ceil(2250 / 2);
   r.pay('T1', { amount: half, tip: 100, method: 'card' });
   assert.throws(() => r.pay('T1', { amount: 5000, method: 'card' }), /left to pay/);
-  r.pay('T1', { amount: 2250 - half, method: 'wallet' });
+  r.pay('T1', { amount: 2250 - half, method: 'bank' });
   const v = r.currentVisit('T1');
   assert.ok(v.paidAt);
   v.payments.forEach(p => r.confirmPayment('T1', p.id));
@@ -84,6 +84,32 @@ test('QR scan works without a camera, and rejects unknown dishes', () => {
   assert.equal(r.table('T5').state, 'seated');
   assert.throws(() => r.placeOrder('T5', [{ id: 'pizza', qty: 1 }]), /not on the menu/);
   assert.throws(() => r.placeOrder('T5', []), /empty/);
+});
+
+test('UPI is only offered once a UPI ID is set, and the link carries the exact amount', () => {
+  const { r } = setup();
+  r.guestOpen('T2');
+  r.placeOrder('T2', [{ id: 'biryani', qty: 2 }]);
+  assert.ok(!r.guestView('T2').payMethods.some(m => m.id === 'upi'));
+  assert.throws(() => r.pay('T2', { amount: 2400, method: 'upi' }), /how you are paying/);
+  assert.throws(() => r.updateSettings({ payments: { methods: ['upi'], upi: { vpa: 'not an id' } } }), /valid UPI ID/);
+  r.updateSettings({ payments: { methods: ['cash', 'upi'], upi: { vpa: 'spice.house@okhdfcbank', payee: 'Spice House' } } });
+  assert.deepEqual(r.guestView('T2').payMethods.map(m => m.id), ['cash', 'upi']);
+  const { payment } = r.pay('T2', { amount: 2400, tip: 240, method: 'upi' });
+  assert.match(payment.upiLink, /^upi:\/\/pay\?pa=spice.house%40okhdfcbank&pn=Spice%20House&am=2640.00&cu=INR/);
+});
+
+test('settings: tables can be added and removed, but not while guests are seated', () => {
+  const { r } = setup();
+  r.cameraReport([{ tableId: 'T8', people: 2 }]);
+  assert.throws(() => r.updateSettings({ tables: r.d.tables.filter(t => t.id !== 'T8') }), /has guests/);
+  const keyT1 = r.table('T1').key;
+  r.updateSettings({ tables: [...r.d.tables.map(t => ({ id: t.id, seats: t.seats })), { id: 'patio1', seats: 6 }] });
+  assert.equal(r.table('PATIO1').seats, 6);
+  assert.equal(r.table('T1').key, keyT1, 'existing QR codes keep working');
+  assert.throws(() => r.updateSettings({ noOrderAlertMin: 0 }), /between 1 and 60/);
+  r.setMenu([{ name: 'Masala Dosa', cat: 'Mains', price: 180, veg: true }, { name: 'Masala Dosa', price: 200 }]);
+  assert.deepEqual(r.d.menu.map(m => m.id), ['masala-dosa', 'masala-dosa-2']);
 });
 
 test('HTTP: table key, staff PIN and camera key are enforced', async () => {
