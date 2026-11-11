@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KOT</title><link rel="stylesheet" href="/print.css"></head>
+<body><div class="slip" id="slip"></div><div class="noprint"><button id="p">Print</button></div>
+<script src="/common.js"></script>
+<script>
+const { esc, api } = TS, w = TS.t();
+const id = location.pathname.split('/').pop();
+(async () => {
+  try {
+    const { order: o } = await api(`/api/orders/${id}`);
+    document.title = `${w.kot} ${o.tableId}`;
+    document.getElementById('p').textContent = w.bPrint;
+    document.getElementById('slip').innerHTML = `<div class="c b">${w.kot}</div><hr>
+      <table><tr><td class="big b">${esc(o.tableId)}</td><td class="r">${w.kOrder} ${esc(o.id)}<br>${new Date(o.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</td></tr></table><hr>
+      <table>${o.lines.map(l => `<tr><td class="big b" style="width:3em">${l.qty}×</td><td class="big">${esc(l.name)}${l.note ? `<br><span style="font-size:13px">» ${esc(l.note)}</span>` : ''}</td></tr>`).join('')}</table><hr>`;
+    document.getElementById('p').onclick = () => window.print();
+    setTimeout(() => window.print(), 300);
+  } catch (e) { document.getElementById('slip').textContent = e.message; }
+})();
+</script></body></html>

@@ -71,7 +71,9 @@ async function loadReport() {
       <div class="kpis">${[[w.rSales, money(r.sales)], [w.rTips, money(r.tips)], [w.rUnconf, money(r.unconfirmed)], [w.rOrdered, money(r.ordered)], [w.rOrders, r.orders], [w.rTables, r.visits], [w.rGuests, r.guests], [w.rWalk, r.walkouts.length]]
         .map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('')}</div>
       ${r.orders || r.byMethod.length ? `<div class="two" style="margin-top:14px">
-        <div>${tbl([w.dish, w.qty, w.revenue], r.dishes.map(d => [esc(d.name), d.qty, money(d.revenue)]))}</div>
+        <div style="display:grid;gap:14px">${tbl([w.dish, w.qty, w.revenue], r.dishes.map(d => [esc(d.name), d.qty, money(d.revenue)]))}
+        ${tbl([w.rDisc, w.bTable, w.amount, w.byW], r.discounts.map(d => [esc(d.reason), esc(d.tableId), money(d.amount), esc(d.by)]))}
+        ${tbl([w.rCancel, w.bTable, w.amount, w.byW], r.cancelled.map(c => [`${c.qty}× ${esc(c.name)} · ${esc(c.reason)}`, esc(c.tableId), money(c.amount), esc(c.by)]))}</div>
         <div style="display:grid;gap:14px">${tbl([w.byMethod, w.count, w.amount], r.byMethod.map(m => [esc(w.methodName[m.method] || m.method), m.count, money(m.amount + m.tips)]))}
         ${tbl([w.hour, w.rGuests, w.rOrders, w.revenue], r.hours.map(h => [`${String(h.hour).padStart(2, '0')}:00`, h.guests, h.orders, money(h.ordered)]))}</div></div>` : `<div class="empty">${w.noData}</div>`}`;
     document.getElementById('day').onchange = e => { day = e.target.value; loadReport(); };

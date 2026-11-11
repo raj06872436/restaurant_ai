@@ -17,6 +17,17 @@ Joining them gives alerts neither can give alone:
 
 Guests can add a note to any dish ("less spicy", "no onion"); it shows on the kitchen ticket.
 
+## Everyday floor tasks
+
+- **Move a table.** Guests want to change tables: press **Move** and pick a free table. Their orders, bill and alerts go with them, and the old table is marked for cleaning.
+- **Join bills.** Two tables want one bill: press **Join bill** on one and pick the other. Both tables then share the orders, payments and total.
+- **Cancel a dish.** On the kitchen screen, press × next to a dish, say how many and why. It shows struck through on the ticket and the bill drops. A paid bill can't be changed.
+- **Discount.** Press **Discount** on a table, choose % or a fixed amount, and give a reason. Waiters can give up to 10% (change this in settings); the owner can give any amount.
+- **GST.** In settings, choose the GST rate (0, 5, 12, 18 or 28%), enter the GSTIN, and say whether menu prices already include GST. Bills then show CGST and SGST.
+- **Printing.** **Print bill** on the floor and **Print ticket** on the kitchen screen open a page sized for an 80 mm receipt printer. It also prints fine on A4.
+
+Every discount and cancellation, with who did it and why, is listed in the daily report and the CSV.
+
 The owner dashboard shows sales, tips, tables in use, guests per hour, average minutes from sitting down to ordering, average time per table, top dishes, and how often guests were left waiting.
 
 ## Daily report
@@ -112,5 +123,5 @@ npm test
 
 - Automatic payment confirmation through a gateway (for example Razorpay). Today staff confirm each payment by hand.
 - The Docker files haven't been run yet (no Docker in the build environment). The app itself is tested.
-- Multiple restaurants or branches, user accounts per waiter, and a real database (the JSON file is fine for one branch).
+- Multiple restaurants or branches, and a real database (the JSON file is fine for one branch).
 - The camera connector has not been run against a live CCTV feed yet. Expect to tune the zones and the confidence threshold on site.

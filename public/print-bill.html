@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bill</title><link rel="stylesheet" href="/print.css"></head>
+<body><div class="slip" id="slip"></div><div class="noprint"><button id="p">Print</button></div>
+<script src="/common.js"></script>
+<script>
+const { esc, money, api } = TS, w = TS.t();
+const table = location.pathname.split('/').pop();
+(async () => {
+  try {
+    const d = await api(`/api/tables/${table}/bill`), b = d.bill, s = d.settings;
+    TS.setCurrency(s.currency);
+    document.title = `${w.bBill} ${d.tables.join('+')}`;
+    document.getElementById('p').textContent = w.bPrint;
+    const half = n => money(Math.round(n / 2));
+    const when = new Date(d.now);
+    const paid = d.visit.payments.reduce((a, p) => { a[p.method] = (a[p.method] || 0) + p.amount + (p.tip || 0); return a; }, {});
+    document.getElementById('slip').innerHTML = `
+      <div class="c"><h1>${esc(s.name)}</h1>${s.address ? `<div>${esc(s.address)}</div>` : ''}${b.tax.gstin ? `<div>GSTIN ${esc(b.tax.gstin)}</div>` : ''}</div><hr>
+      <table><tr><td>${w.bNo} ${esc(d.visit.id)}</td><td class="r">${w.bTable} ${esc(d.tables.join('+'))}</td></tr>
+      <tr><td>${when.toLocaleDateString('en-IN')}</td><td class="r">${when.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</td></tr></table><hr>
+      <table>${b.lines.filter(l => l.qty > 0).map(l => `<tr><td>${esc(l.name)}<br>${l.qty} × ${money(l.price)}</td><td class="r">${money(l.qty * l.price)}</td></tr>`).join('')}</table><hr>
+      <table><tr><td>${w.bSub}</td><td class="r">${money(b.subtotal)}</td></tr>
+      ${b.discount ? `<tr><td>${w.bDisc} (${esc(b.discountInfo.reason)})</td><td class="r">− ${money(b.discount)}</td></tr>` : ''}
+      ${b.tax.rate && !b.tax.inclusive ? `<tr><td>CGST ${b.tax.rate / 2}%</td><td class="r">${half(b.tax.amount)}</td></tr><tr><td>SGST ${b.tax.rate / 2}%</td><td class="r">${half(b.tax.amount)}</td></tr>` : ''}
+      <tr class="b big"><td>${w.bTotal}</td><td class="r">${money(b.total)}</td></tr>
+      ${b.tax.rate && b.tax.inclusive ? `<tr><td colspan="2">${w.bInclGst(b.tax.rate)} (CGST ${half(b.tax.amount)} + SGST ${half(b.tax.amount)})</td></tr>` : ''}
+      ${Object.entries(paid).map(([m, a]) => `<tr><td>${w.bPaid} · ${esc(w.methodName[m] || m)}</td><td class="r">${money(a)}</td></tr>`).join('')}
+      ${b.due ? `<tr class="b"><td>${w.bDue}</td><td class="r">${money(b.due)}</td></tr>` : ''}</table><hr>
+      <div class="c">${w.bThanks}</div>`;
+    document.getElementById('p').onclick = () => window.print();
+    setTimeout(() => window.print(), 300);
+  } catch (e) { document.getElementById('slip').textContent = e.message; }
+})();
+</script></body></html>
