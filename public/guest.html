@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Menu</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="/app.css">
+<style>
+.g{max-width:520px;margin:0 auto;padding:16px max(16px,env(safe-area-inset-left)) 120px;display:grid;gap:14px}
+.cats{position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:2;overflow-x:auto;flex-wrap:nowrap}
+.dish{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.dish small{display:block;color:var(--muted);font-size:.8rem}
+.qty{font-family:var(--f-mono);min-width:1.6em;text-align:center}
+.bar{position:fixed;left:0;right:0;bottom:0;padding:12px max(16px,env(safe-area-inset-left)) calc(12px + env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line)}
+.bar .in{max-width:520px;margin:0 auto;display:flex;gap:8px}
+.bar button{flex:1}
+.box{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel);display:grid;gap:6px}
+.steps{display:flex;gap:4px}.steps span{flex:1;height:6px;border-radius:3px;background:var(--line)}.steps span.on{background:var(--accent)}
+.big{font-family:var(--f-display);font-size:1.6rem}
+.tabs{display:flex;gap:6px}
+</style></head>
+<body>
+<div class="g" id="app"><p class="muted">Loading the menu…</p></div>
+<div class="bar" id="bar" hidden><div class="in" id="barIn"></div></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common.js"></script>
+<script>
+const { esc, money, api, toast } = TS;
+const tableId = location.pathname.split('/').pop();
+const key = new URLSearchParams(location.search).get('k') || '';
+const H = { 'x-table-key': key };
+let view = null, cart = {}, tab = 'menu', cat = null, split = 1, tip = 10, method = 'cash', busy = false;
+
+async function load() {
+  try { view = await api(`/api/guest/${tableId}`, { headers: H }); TS.setCurrency(view.currency); render(); }
+  catch (e) { document.getElementById('app').innerHTML = `<h3>Can't open this table</h3><p class="muted">${esc(e.message)}</p>`; }
+}
+const cartLines = () => Object.entries(cart).filter(([, q]) => q > 0).map(([id, qty]) => ({ ...view.menu.find(m => m.id === id), qty }));
+const shareOf = bill => Math.min(Math.ceil(bill.total / split), bill.due);
+const cartTotal = () => cartLines().reduce((a, l) => a + l.price * l.qty, 0);
+
+function statusOf() {
+  const open = view.orders.filter(o => ['new', 'cooking', 'ready'].includes(o.status));
+  if (!view.orders.length) return null;
+  const st = open.length ? open.reduce((a, o) => ['new', 'cooking', 'ready'].indexOf(o.status) < ['new', 'cooking', 'ready'].indexOf(a) ? o.status : a, 'ready') : 'served';
+  return { st, step: { new: 1, cooking: 2, ready: 3, served: 4 }[st], words: { new: 'The kitchen has your order', cooking: 'Your food is cooking', ready: 'Your food is on its way', served: 'Enjoy your meal' }[st] };
+}
+
+function render() {
+  const app = document.getElementById('app'), bar = document.getElementById('bar'), barIn = document.getElementById('barIn');
+  const s = statusOf(), bill = view.bill;
+  document.title = `${view.restaurant} · ${view.table.id}`;
+  let h = `<div class="row"><div><div class="tag">${esc(view.restaurant)}</div><h1>Table ${esc(view.table.id.replace(/^T/, ''))}</h1></div>
+    <button class="mini" data-act="call" ${view.waiterCalled ? 'disabled' : ''}>${view.waiterCalled ? 'Waiter is coming ✓' : 'Call waiter'}</button></div>
+    <div class="tabs chips"><button class="chip ${tab === 'menu' ? 'sel' : ''}" data-tab="menu">Menu</button>
+    <button class="chip ${tab === 'order' ? 'sel' : ''}" data-tab="order">My order${view.orders.length ? ' ✓' : ''}</button>
+    <button class="chip ${tab === 'bill' ? 'sel' : ''}" data-tab="bill">Bill & pay</button></div>`;
+  if (tab === 'menu') {
+    const cats = [...new Set(view.menu.map(m => m.cat))];
+    cat = cat || cats[0];
+    h += `<div class="chips cats">${cats.map(c => `<button class="chip ${c === cat ? 'sel' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>`;
+    h += view.menu.filter(m => m.cat === cat).map(m => `<div class="dish"><div>${esc(m.name)}<small>${esc(m.desc)}${m.desc ? ' · ' : ''}${money(m.price)}</small></div>
+      <div class="row"><button class="mini" data-dec="${esc(m.id)}" aria-label="Remove one ${esc(m.name)}">−</button><span class="qty">${cart[m.id] || 0}</span>
+      <button class="mini" data-inc="${esc(m.id)}" aria-label="Add one ${esc(m.name)}">+</button></div></div>`).join('');
+    const n = cartLines().reduce((a, l) => a + l.qty, 0);
+    bar.hidden = !n;
+    barIn.innerHTML = `<button class="primary" data-act="send" ${busy ? 'disabled' : ''}>Send ${n} item${n > 1 ? 's' : ''} to kitchen · ${money(cartTotal())}</button>`;
+  } else if (tab === 'order') {
+    bar.hidden = true;
+    if (!s) h += `<p class="muted">You haven't ordered yet. Pick dishes from the menu.</p>`;
+    else {
+      h += `<h3>${s.words}</h3><div class="steps">${[1, 2, 3, 4].map(i => `<span class="${i <= s.step ? 'on' : ''}"></span>`).join('')}</div>`;
+      h += view.orders.map(o => `<div class="box"><div class="row"><span class="tag">Order ${esc(o.id)} · ${esc(o.status)}</span><b>${money(o.total)}</b></div>
+        ${o.lines.map(l => `<div class="row"><span>${esc(l.name)} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></div>`).join('')}</div>`).join('');
+    }
+    h += `<div class="box"><span class="tag">Guest Wi-Fi</span><div class="row"><span>${esc(view.wifi.network)}</span><span style="font-family:var(--f-mono)">${esc(view.wifi.password)}</span></div>
+      <button class="mini" data-act="copywifi">Copy password</button></div>`;
+  } else {
+    bar.hidden = true;
+    if (!bill || !bill.total) h += `<p class="muted">Your bill will show here after you order.</p>`;
+    else if (!bill.due) h += `<div class="box"><h3>Paid in full. Thank you!</h3><p class="muted" style="margin:0">Total ${money(bill.total)}${bill.tips ? `, tip ${money(bill.tips)}` : ''}.</p></div>`;
+    else {
+      const share = shareOf(bill), shareTip = Math.round(share * tip / 100);
+      h += `<div class="box">${bill.lines.map(l => `<div class="row"><span>${esc(l.name)} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></div>`).join('')}
+        <div class="row"><b>Total</b><b class="num">${money(bill.total)}</b></div>${bill.paid ? `<div class="row"><span>Already paid</span><span class="num">− ${money(bill.paid)}</span></div><div class="row"><b>Left to pay</b><b>${money(bill.due)}</b></div>` : ''}</div>
+        <span class="tag">Split</span><div class="chips">${[1, 2, 3, 4, 5, 6].map(n => `<button class="chip ${split === n ? 'sel' : ''}" data-split="${n}">${n === 1 ? 'Whole bill' : n + ' ways'}</button>`).join('')}</div>
+        <span class="tag">Tip</span><div class="chips">${[0, 5, 10, 15].map(n => `<button class="chip ${tip === n ? 'sel' : ''}" data-tip="${n}">${n}%</button>`).join('')}</div>
+        <span class="tag">Pay with</span><div class="chips">${[['cash', 'Cash'], ['card', 'Card'], ['bank', 'Bank transfer'], ['wallet', 'JazzCash / Easypaisa']].map(([v, l]) => `<button class="chip ${method === v ? 'sel' : ''}" data-method="${v}">${l}</button>`).join('')}</div>
+        <div class="box"><div class="row"><span>${split > 1 ? 'Your share' : 'To pay'}</span><span class="big num">${money(share + shareTip)}</span></div>
+        <span class="muted" style="font-size:.85rem">${method === 'cash' || method === 'card' ? 'A waiter will come to collect it.' : 'Staff will confirm when your transfer arrives.'}</span></div>`;
+      bar.hidden = false;
+      barIn.innerHTML = `<button class="primary" data-act="pay" ${busy ? 'disabled' : ''}>Pay ${money(share + shareTip)}</button>`;
+    }
+  }
+  app.innerHTML = h;
+}
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b || busy) return;
+  const d = b.dataset;
+  if (d.tab) tab = d.tab;
+  if (d.cat) cat = d.cat;
+  if (d.inc) cart[d.inc] = (cart[d.inc] || 0) + 1;
+  if (d.dec) cart[d.dec] = Math.max(0, (cart[d.dec] || 0) - 1);
+  if (d.split) split = +d.split;
+  if (d.tip) tip = +d.tip;
+  if (d.method) method = d.method;
+  try {
+    if (d.act === 'call') { await api(`/api/guest/${tableId}/call`, { headers: H, body: { reason: 'help' } }); toast('A waiter is on the way.'); await load(); return; }
+    if (d.act === 'copywifi') { try { await navigator.clipboard.writeText(view.wifi.password); toast('Password copied.'); } catch { toast(view.wifi.password); } return; }
+    if (d.act === 'send') {
+      busy = true; render();
+      await api(`/api/guest/${tableId}/order`, { headers: H, body: { items: cartLines().map(l => ({ id: l.id, qty: l.qty })) } });
+      cart = {}; tab = 'order'; toast('Order sent to the kitchen.');
+    }
+    if (d.act === 'pay') {
+      busy = true; render();
+      const share = shareOf(view.bill);
+      await api(`/api/guest/${tableId}/pay`, { headers: H, body: { amount: share, tip: Math.round(share * tip / 100), method } });
+      toast(method === 'cash' || method === 'card' ? 'A waiter is coming to collect your payment.' : 'Payment sent. Staff will confirm it.');
+    }
+  } catch (err) { toast(err.message); }
+  busy = false;
+  if (d.act) await load(); else render();
+});
+
+(async () => {
+  try { await api(`/api/guest/${tableId}/open`, { headers: H, body: {} }); } catch {}
+  await load();
+  TS.live(load, { table: tableId, k: key });
+})();
+</script>
+</body></html>

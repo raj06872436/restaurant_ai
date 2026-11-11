@@ -1,0 +1,15 @@
+{
+  "server": "http://localhost:3000",
+  "camera_key": "change-me-camera-key",
+  "source": "rtsp://user:password@192.168.1.20:554/stream1",
+  "model": "yolov8n.pt",
+  "confidence": 0.4,
+  "send_every_sec": 3,
+  "seat_after_sec": 20,
+  "leave_after_sec": 60,
+  "staff_uniform_hsv": { "low": [0, 0, 0], "high": [180, 255, 60], "min_share": 0.4 },
+  "tables": [
+    { "id": "T1", "polygon": [[40, 300], [260, 300], [260, 470], [40, 470]] },
+    { "id": "T2", "polygon": [[300, 300], [520, 300], [520, 470], [300, 470]] }
+  ]
+}
