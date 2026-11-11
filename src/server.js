@@ -10,17 +10,20 @@ const { Store } = require('./store');
 const { Restaurant, httpError } = require('./restaurant');
 const { Team } = require('./team');
 const { translate } = require('./i18n');
+const { createRazorpay } = require('./razorpay');
 
 function createApp({
   dataFile = path.join(__dirname, '..', 'data', 'db.json'),
   staffPin = process.env.STAFF_PIN || '1234',
   cameraKey = process.env.CAMERA_KEY || 'change-me-camera-key',
   publicUrl = process.env.PUBLIC_URL || '',
+  razorpay = createRazorpay({ keyId: process.env.RAZORPAY_KEY_ID, keySecret: process.env.RAZORPAY_KEY_SECRET, webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET }),
   now,
 } = {}) {
   const store = new Store(dataFile);
   const photoDir = path.join(dataFile ? path.dirname(dataFile) : require('os').tmpdir(), 'photos');
   const r = new Restaurant(store, now);
+  r.onlineReady = razorpay.ready;
   const app = express();
   const server = http.createServer(app);
   const io = new Server(server);
@@ -37,7 +40,7 @@ function createApp({
   };
   sessions.dropMissing();
 
-  app.use(express.json({ limit: '100kb' }));
+  app.use(express.json({ limit: '100kb', verify: (req, res, buf) => { req.rawBody = buf; } })); // raw body kept for webhook signatures
   app.use(cookieParser());
   app.use((req, res, next) => { // error messages in the screen's language
     const json = res.json.bind(res);
@@ -91,7 +94,38 @@ function createApp({
   app.post('/api/guest/:table/open', wrap(req => { r.guestOpen(guestTable(req).id); return r.guestView(req.params.table); }));
   app.post('/api/guest/:table/order', wrap(req => r.placeOrder(guestTable(req).id, req.body.items)));
   app.post('/api/guest/:table/call', wrap(req => r.callWaiter(guestTable(req).id, req.body.reason)));
-  app.post('/api/guest/:table/pay', wrap(req => r.pay(guestTable(req).id, req.body)));
+  app.post('/api/guest/:table/pay', async (req, res) => {
+    let pending = null;
+    try {
+      const t = guestTable(req);
+      const out = r.pay(t.id, req.body);
+      if (req.body.method !== 'online') return res.json(out);
+      pending = out.payment;
+      const order = await razorpay.createOrder({ amount: pending.amount + pending.tip, receipt: `${t.id}-${pending.id}`, notes: { table: t.id, payment: pending.id } });
+      r.attachGatewayOrder(pending.id, order.id);
+      res.json({ ...out, razorpay: { key: razorpay.keyId, orderId: order.id, amount: order.amount, currency: order.currency, name: r.d.settings.name, description: `${t.id} bill` } });
+    } catch (e) {
+      if (pending) r.dropPending(pending.id);
+      res.status(e.status || 500).json({ error: e.status ? e.message : 'Something went wrong.' });
+      if (!e.status) console.error(e);
+    }
+  });
+  app.post('/api/guest/:table/razorpay/verify', wrap(req => {
+    guestTable(req);
+    const { razorpay_order_id: orderId, razorpay_payment_id: paymentId, razorpay_signature: signature } = req.body;
+    if (!razorpay.verifyPayment({ orderId, paymentId, signature })) throw httpError(400, "We couldn't confirm this payment. If money was taken, show a waiter the message from your bank.");
+    const p = r.onlinePaid(orderId, paymentId, 'checkout');
+    if (!p) throw httpError(404, 'Payment not found');
+    return { ok: true, payment: p };
+  }));
+  // Razorpay calls this even if the guest closes the page right after paying. Set it up in the Razorpay dashboard.
+  app.post('/api/razorpay/webhook', (req, res) => {
+    if (!razorpay.verifyWebhook(req.rawBody, req.get('x-razorpay-signature'))) return res.status(400).json({ error: 'Bad signature' });
+    const ev = req.body || {};
+    const pay = ev.payload && ev.payload.payment && ev.payload.payment.entity;
+    if (pay && pay.order_id && ['payment.captured', 'order.paid'].includes(ev.event)) r.onlinePaid(pay.order_id, pay.id, 'webhook');
+    res.json({ ok: true });
+  });
 
   app.get('/api/guest/:table/upi/:pid.svg', async (req, res) => {
     try {
@@ -112,7 +146,7 @@ function createApp({
   }));
 
   /* ---------- staff ---------- */
-  app.get('/api/staff', need('kitchen'), wrap(() => r.staffView()));
+  app.get('/api/staff', need('kitchen'), wrap(() => ({ ...r.staffView(), online: { ready: razorpay.ready, testMode: razorpay.testMode, webhook: razorpay.webhookReady } })));
   app.post('/api/alerts/:id/ack', need('floor'), wrap(req => r.ackAlert(req.params.id, by(req))));
   app.post('/api/tables/:table/clean', need('floor'), wrap(req => r.markClean(req.params.table, by(req))));
   app.post('/api/tables/:table/seat', need('floor'), wrap(req => { const v = r.seat(r.table(req.params.table), Number(req.body.guests) || 2, 'staff'); r.changed(); return v; }));

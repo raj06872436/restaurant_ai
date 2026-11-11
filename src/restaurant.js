@@ -3,7 +3,7 @@
 const EventEmitter = require('events');
 
 const MIN = 60 * 1000;
-const METHOD_LABEL = { cash: 'Cash', card: 'Card', upi: 'UPI', bank: 'Bank transfer', wallet: 'Wallet' };
+const METHOD_LABEL = { online: 'Pay online', cash: 'Cash', card: 'Card', upi: 'UPI', bank: 'Bank transfer', wallet: 'Wallet' };
 
 class Restaurant extends EventEmitter {
   constructor(store, now = () => Date.now()) {
@@ -139,14 +139,15 @@ class Restaurant extends EventEmitter {
   billFor(v) {
     const orders = this.d.orders.filter(o => o.visitId === v.id && o.status !== 'cancelled');
     const total = orders.reduce((a, o) => a + o.total, 0);
-    const paid = v.payments.reduce((a, p) => a + p.amount, 0);
-    const tips = v.payments.reduce((a, p) => a + (p.tip || 0), 0);
+    const done = v.payments.filter(p => !p.pending); // online payments count once Razorpay says they're paid
+    const paid = done.reduce((a, p) => a + p.amount, 0);
+    const tips = done.reduce((a, p) => a + (p.tip || 0), 0);
     const lines = {};
     for (const o of orders) for (const l of o.lines) {
       lines[l.id] = lines[l.id] || { id: l.id, name: l.name, price: l.price, qty: 0 };
       lines[l.id].qty += l.qty;
     }
-    const unconfirmed = v.payments.filter(p => !p.confirmed).reduce((a, p) => a + p.amount + (p.tip || 0), 0);
+    const unconfirmed = done.filter(p => !p.confirmed).reduce((a, p) => a + p.amount + (p.tip || 0), 0);
     return { total, paid, tips, unconfirmed, due: Math.max(0, total - paid), lines: Object.values(lines) };
   }
   pay(tableId, { amount, tip = 0, method }) {
@@ -162,6 +163,14 @@ class Restaurant extends EventEmitter {
     // staff confirm when the money shows up. A gateway with automatic confirmation can replace this later.
     const p = { id: this.store.id('P'), amount, tip, method, at: this.now(), confirmed: false };
     if (method === 'upi') p.upiLink = this.upiLink(amount + tip, `${t.id} ${p.id}`);
+    if (method === 'online') {
+      // Not counted until Razorpay confirms it. An unfinished checkout for the same visit is replaced.
+      v.payments = v.payments.filter(x => !x.pending);
+      p.pending = true;
+      v.payments.push(p);
+      this.changed();
+      return { payment: p, due: bill.due };
+    }
     v.payments.push(p);
     const left = bill.due - amount;
     if (left === 0) v.paidAt = this.now();
@@ -181,8 +190,35 @@ class Restaurant extends EventEmitter {
 
   paymentMethods() {
     const pay = this.d.settings.payments || { methods: ['cash', 'card'] };
-    return pay.methods.filter(m => m !== 'upi' || (pay.upi && pay.upi.vpa));
+    return pay.methods.filter(m => (m !== 'upi' || (pay.upi && pay.upi.vpa)) && (m !== 'online' || this.onlineReady));
   }
+  attachGatewayOrder(paymentId, orderId) {
+    const p = this.findPayment(paymentId);
+    if (!p) throw httpError(404, 'Payment not found');
+    p.rzpOrderId = orderId;
+    this.changed();
+  }
+  dropPending(paymentId) {
+    for (const v of this.d.visits) v.payments = v.payments.filter(p => !(p.id === paymentId && p.pending));
+    this.changed();
+  }
+  findPayment(id) { for (const v of this.d.visits) { const p = v.payments.find(x => x.id === id); if (p) return p; } return null; }
+  // Razorpay confirmed the money (checkout handler or webhook). Safe to call twice.
+  onlinePaid(orderId, rzpPaymentId, source) {
+    for (const v of this.d.visits) {
+      const p = v.payments.find(x => x.rzpOrderId === orderId);
+      if (!p) continue;
+      if (!p.pending) return p;
+      Object.assign(p, { pending: false, confirmed: true, confirmedBy: 'Razorpay', rzpPaymentId, paidVia: source, at: this.now() });
+      if (this.billFor(v).due === 0 && !v.paidAt) v.paidAt = this.now();
+      const a = this.raise(v.tableId, 'online', `${v.tableId} paid ${this.money(p.amount + p.tip)} online. No action needed.`, 'razorpay', { amount: p.amount + p.tip });
+      a.doneAt = this.now(); a.doneBy = 'Razorpay';
+      this.changed();
+      return p;
+    }
+    return null;
+  }
+
   upiLink(amount, note) {
     const { vpa, payee } = this.d.settings.payments.upi;
     const q = new URLSearchParams({ pa: vpa, pn: payee || this.d.settings.name, am: Number(amount).toFixed(2), cu: 'INR', tn: `${this.d.settings.name} ${note}`.slice(0, 50) });
@@ -291,7 +327,7 @@ class Restaurant extends EventEmitter {
   /* ---------- owner numbers ---------- */
   stats(dayStart = startOfDay(this.now())) {
     const visits = this.d.visits.filter(v => v.seatedAt >= dayStart);
-    const all = visits.flatMap(v => v.payments), payments = all.filter(p => p.confirmed);
+    const all = visits.flatMap(v => v.payments).filter(p => !p.pending), payments = all.filter(p => p.confirmed);
     const sales = payments.reduce((a, p) => a + p.amount, 0);
     const tips = payments.reduce((a, p) => a + (p.tip || 0), 0);
     const waits = visits.filter(v => v.firstOrderAt).map(v => (v.firstOrderAt - v.seatedAt) / MIN);
@@ -320,7 +356,7 @@ class Restaurant extends EventEmitter {
     if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(start)) throw httpError(400, 'Pick a valid date.');
     const end = start + 24 * 60 * MIN;
     const inDay = ts => ts >= start && ts < end;
-    const payments = this.d.visits.flatMap(v => v.payments.map(p => ({ ...p, tableId: v.tableId }))).filter(p => inDay(p.at));
+    const payments = this.d.visits.flatMap(v => v.payments.map(p => ({ ...p, tableId: v.tableId }))).filter(p => inDay(p.at) && !p.pending);
     const confirmed = payments.filter(p => p.confirmed);
     const byMethod = {};
     for (const p of confirmed) {

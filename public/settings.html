@@ -39,7 +39,7 @@ select{border:1px solid var(--line);background:var(--panel);border-radius:8px;pa
 <script>
 const { esc, api, toast } = TS;
 const w = TS.t();
-const METHODS = ['cash', 'card', 'upi', 'bank'];
+const METHODS = ['online', 'cash', 'card', 'upi', 'bank'];
 let data, menu, tables, team;
 
 async function load() {
@@ -69,7 +69,8 @@ function render() {
           <div class="chips">${METHODS.map(id => `<label class="check"><input type="checkbox" id="pm-${id}" ${pay.methods.includes(id) ? 'checked' : ''}> ${w.methodName[id]}</label>`).join('')}</div>
           <div class="grid2"><label>${w.upiId}<input id="s-vpa" type="text" placeholder="restaurant@okhdfcbank" value="${esc(pay.upi && pay.upi.vpa)}"></label>
           <label>${w.upiName}<input id="s-payee" type="text" value="${esc(pay.upi && pay.upi.payee)}"></label></div>
-          <span class="muted" style="font-size:.82rem">${w.upiHelp}</span></fieldset>
+          <span class="muted" style="font-size:.82rem">${w.upiHelp}</span>
+          <span class="${data.online && data.online.ready ? 'muted' : 'err'}" style="font-size:.82rem">${data.online && data.online.ready ? w.onlineOn(data.online.testMode, data.online.webhook) : w.onlineOff}</span></fieldset>
         <fieldset><legend>${w.tables}</legend>
           <div class="tables">${tables.map((t, i) => `<div class="trow"><b style="flex:1">${esc(t.id)}</b><input type="number" min="1" max="30" value="${t.seats}" data-seats="${i}" aria-label="${w.seatsWord} ${esc(t.id)}"><span class="muted" style="font-size:.75rem">${w.seatsWord}</span>
             ${t.busy ? '' : `<button type="button" class="mini" data-deltable="${i}" aria-label="× ${esc(t.id)}">×</button>`}</div>`).join('')}</div>
