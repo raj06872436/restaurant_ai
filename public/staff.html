@@ -26,9 +26,9 @@
 <script src="/common.js"></script>
 <script>
 const { esc, money, api, toast, ago, time } = TS;
+const w = TS.t();
 const COLOR = { free: '--free', seated: '--seated', ordered: '--ordered', eating: '--eating', dirty: '--dirty' };
-const LABEL = { free: 'Free', seated: 'Seated · no order', ordered: 'Ordered', eating: 'Eating', dirty: 'Needs cleaning' };
-const KIND = { waiting: ['--seated', 'On my way'], call: ['--saffron', 'On my way'], bill: ['--saffron', 'On my way'], clean: ['--dirty', 'Cleaned'], ready: ['--ordered', 'Served'], payment: ['--free', ''], unpaid: ['--dirty', 'Checked'] };
+const KIND = { waiting: ['--seated', 'onMyWay'], call: ['--saffron', 'onMyWay'], bill: ['--saffron', 'onMyWay'], clean: ['--dirty', 'cleaned'], ready: ['--ordered', 'served'], payment: ['--free', ''], unpaid: ['--dirty', 'checked'] };
 let data, seenAlerts = new Set(), audio;
 
 function beep() {
@@ -44,42 +44,43 @@ async function load() {
 function render() {
   const open = data.alerts.filter(a => !a.doneAt);
   const used = data.tables.filter(t => !['free', 'dirty'].includes(t.state));
-  document.title = open.length ? `(${open.length}) TableSense · Floor` : 'TableSense · Floor';
+  document.title = open.length ? `(${open.length}) TableSense · ${w.floorTitle}` : `TableSense · ${w.floorTitle}`;
   const tables = data.tables.map(t => {
     const v = t.visit, alarm = open.some(a => a.tableId === t.id && ['waiting', 'call', 'bill', 'clean', 'unpaid'].includes(a.kind));
     const acts = [];
-    if (t.state === 'free') acts.push(`<button data-seat="${t.id}">Seat guests</button>`);
-    if (v && !v.waiterAt) acts.push(`<button data-waiter="${t.id}">Waiter visited</button>`);
-    if (v) acts.push(`<button data-leave="${t.id}">Guests left</button>`);
-    if (t.state === 'dirty') acts.push(`<button data-clean="${t.id}">Cleaned</button>`);
+    if (t.state === 'free') acts.push(`<button data-seat="${t.id}">${w.seatGuests}</button>`);
+    if (v && !v.waiterAt) acts.push(`<button data-waiter="${t.id}">${w.markWaiter}</button>`);
+    if (v) acts.push(`<button data-leave="${t.id}">${w.guestsLeft}</button>`);
+    if (t.state === 'dirty') acts.push(`<button data-clean="${t.id}">${w.cleaned}</button>`);
     return `<div class="tbl ${alarm ? 'alarm' : ''}" style="--c:var(${COLOR[t.state]})">
-      <div class="row"><b>${esc(t.id)}</b><span>${v ? `${v.guests} guest${v.guests > 1 ? 's' : ''}` : `${t.seats} seats`}</span></div>
-      <span class="st">${LABEL[t.state]}</span><span>${ago(t.since)}</span>
-      ${v ? `<span>${v.waiterAt ? 'Waiter visited' : 'No waiter yet'}${v.scannedAt ? ' · QR scanned' : ''}</span>` : ''}
-      ${t.bill && t.bill.total ? `<span>Bill ${money(t.bill.total)}${t.bill.due ? ` · due ${money(t.bill.due)}` : ' · paid'}</span>` : ''}
+      <div class="row"><b>${esc(t.id)}</b><span>${v ? w.guests(v.guests) : w.seats(t.seats)}</span></div>
+      <span class="st">${w.state[t.state]}</span><span>${ago(t.since)}</span>
+      ${v ? `<span>${v.waiterAt ? w.waiterVisited : w.noWaiter}${v.scannedAt ? ' · ' + w.qrScanned : ''}</span>` : ''}
+      ${t.bill && t.bill.total ? `<span>${t.bill.due ? w.billDue(money(t.bill.total), money(t.bill.due)) : w.billPaid(money(t.bill.total))}</span>` : ''}
       <div class="acts">${acts.join('')}</div></div>`;
   }).join('');
   const alerts = data.alerts.slice(0, 30).map(a => {
-    const [c, label] = KIND[a.kind] || ['--muted', 'Done'];
-    let btn = label ? `<button class="mini" data-ack="${a.id}">${label}</button>` : '';
+    const [c, label] = KIND[a.kind] || ['--muted', 'done'];
+    let btn = label ? `<button class="mini" data-ack="${a.id}">${w[label]}</button>` : '';
     if (a.kind === 'payment' && !a.doneAt) {
-      const t = data.tables.find(x => x.id === a.tableId), p = t.visit && t.visit.payments.filter(p => !p.confirmed).slice(-1)[0];
-      btn = p ? `<button class="mini" data-confirm="${a.tableId}|${p.id}">Confirm ${money(p.amount + p.tip)}</button>` : `<button class="mini" data-ack="${a.id}">OK</button>`;
+      const t = data.tables.find(x => x.id === a.tableId), p = t && t.visit && t.visit.payments.filter(p => !p.confirmed).slice(-1)[0];
+      btn = p ? `<button class="mini" data-confirm="${a.tableId}|${p.id}">${w.confirm(money(p.amount + p.tip))}</button>` : `<button class="mini" data-ack="${a.id}">${w.ok}</button>`;
     }
+    const doneLabel = a.doneBy && !['system', 'camera', 'staff'].includes(a.doneBy) ? w.doneBy(esc(a.doneBy)) : w.done;
     return `<div class="alert ${a.doneAt ? 'done' : ''}" style="--c:var(${c})"><b style="font-family:var(--f-mono)">${esc(a.tableId)}</b>
-      <div><div class="src">${esc(a.source)} · ${time(a.at)}</div>${esc(a.text)}</div>${a.doneAt ? '<span class="tag">Done</span>' : btn}</div>`;
+      <div><div class="src">${esc(w.src[a.source] || a.source)} · ${time(a.at)}</div>${esc(TS.alertText(a))}</div>${a.doneAt ? `<span class="tag">${doneLabel}</span>` : btn}</div>`;
   }).join('');
   document.getElementById('root').innerHTML = `${TS.nav('/staff')}
     <div class="layout">
-      <section class="panel"><div class="ph"><h2>Floor</h2><span class="tag">${used.length}/${data.tables.length} tables in use · ${used.reduce((a, t) => a + (t.visit ? t.visit.guests : 0), 0)} guests</span></div>
+      <section class="panel"><div class="ph"><h2>${w.floorTitle}</h2><span class="tag">${w.inUse(used.length, data.tables.length, used.reduce((a, t) => a + (t.visit ? t.visit.guests : 0), 0))}</span></div>
         <div class="cam"><div class="floor">${tables}</div>
-        <div class="legend">${Object.keys(LABEL).map(k => `<span style="--c:var(${COLOR[k]})"><i></i>${LABEL[k]}</span>`).join('')}</div></div></section>
-      <section class="panel"><div class="ph"><h2>Alerts</h2><span class="tag">${open.length} open</span></div>
-        <div class="alerts">${alerts || '<div class="empty">No alerts. Every table is looked after.</div>'}</div></section>
+        <div class="legend">${Object.keys(COLOR).map(k => `<span style="--c:var(${COLOR[k]})"><i></i>${w.state[k]}</span>`).join('')}</div></div></section>
+      <section class="panel"><div class="ph"><h2>${w.alerts}</h2><span class="tag">${w.open(open.length)}</span></div>
+        <div class="alerts">${alerts || `<div class="empty">${w.noAlerts}</div>`}</div></section>
     </div>`;
 }
 document.addEventListener('click', async e => {
-  const b = e.target.closest('button'); if (!b) return;
+  const b = e.target.closest('button'); if (!b || b.dataset.ts) return;
   const d = b.dataset;
   try {
     if (d.ack) await api(`/api/alerts/${d.ack}/ack`, { body: {} });
@@ -87,10 +88,10 @@ document.addEventListener('click', async e => {
     if (d.waiter) await api(`/api/tables/${d.waiter}/waiter`, { body: {} });
     if (d.leave) await api(`/api/tables/${d.leave}/leave`, { body: {} });
     if (d.clean) await api(`/api/tables/${d.clean}/clean`, { body: {} });
-    if (d.confirm) { const [t, p] = d.confirm.split('|'); await api(`/api/tables/${t}/payments/${p}/confirm`, { body: {} }); toast('Payment confirmed.'); }
+    if (d.confirm) { const [t, p] = d.confirm.split('|'); await api(`/api/tables/${t}/payments/${p}/confirm`, { body: {} }); toast(w.paymentConfirmed); }
     await load();
   } catch (err) { toast(err.message); }
 });
-TS.staffGate(() => TS.live(load));
+TS.staffGate(() => TS.live(load), 'floor');
 </script>
 </body></html>
