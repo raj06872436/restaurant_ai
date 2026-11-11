@@ -15,7 +15,13 @@ Joining them gives alerts neither can give alone:
 | Guest pays in the app | "T4 is paying Rs 1,128 by wallet. Confirm the payment." |
 | Camera sees the table empty | "Guests left T4. Clean and reset the table." Plus an "unpaid" alert if the bill wasn't settled |
 
+Guests can add a note to any dish ("less spicy", "no onion"); it shows on the kitchen ticket.
+
 The owner dashboard shows sales, tips, tables in use, guests per hour, average minutes from sitting down to ordering, average time per table, top dishes, and how often guests were left waiting.
+
+## Daily report
+
+The bottom of the owner dashboard has a report for any day: sales by payment method, tips, payments still waiting for confirmation, every dish sold, guests and orders per hour, people who left without paying, and the team table. **Download CSV** opens in Excel or Google Sheets.
 
 ## Run it with Docker (easiest)
 
@@ -105,7 +111,6 @@ npm test
 ## Not built yet
 
 - Automatic payment confirmation through a gateway (for example Razorpay). Today staff confirm each payment by hand.
-- Staff logins reset when the server restarts (people log in again). Error messages from the server are English only.
 - The Docker files haven't been run yet (no Docker in the build environment). The app itself is tested.
 - Multiple restaurants or branches, user accounts per waiter, and a real database (the JSON file is fine for one branch).
 - The camera connector has not been run against a live CCTV feed yet. Expect to tune the zones and the confidence threshold on site.

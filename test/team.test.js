@@ -71,3 +71,29 @@ test('wrong PINs are slowed down after 5 tries', async () => {
     assert.equal((await app.call('/api/login', { body: { pin: '1111' } })).status, 429);
   } finally { app.stop(); }
 });
+
+test('staff stay logged in after a restart; errors come back in Hindi when asked', async () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ts-')), 'db.json');
+  const a = createApp({ dataFile: file, staffPin: '1111' });
+  await new Promise(res => a.server.listen(0, res));
+  let base = `http://localhost:${a.server.address().port}`;
+  const login = await fetch(base + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"pin":"1111"}' });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const hi = await fetch(base + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json', 'x-lang': 'hi' }, body: '{"pin":"0000"}' });
+  assert.equal((await hi.json()).error, 'गलत PIN। फिर कोशिश करें।');
+  await new Promise(res => a.server.close(res)); a.restaurant.removeAllListeners();
+  assert.ok(!fs.readFileSync(file, 'utf8').includes(cookie.split('=')[1]), 'raw session id is not stored');
+
+  const b = createApp({ dataFile: file, staffPin: '1111' });
+  await new Promise(res => b.server.listen(0, res));
+  base = `http://localhost:${b.server.address().port}`;
+  try {
+    const me = await (await fetch(base + '/api/me', { headers: { cookie } })).json();
+    assert.equal(me.name, 'Owner');
+    const report = await fetch(base + '/api/report.csv', { headers: { cookie } });
+    assert.equal(report.status, 200);
+    assert.match(await report.text(), /Sales \(confirmed\),0/);
+    assert.equal((await fetch(base + '/api/report?date=nope', { headers: { cookie } })).status, 400);
+  } finally { b.server.close(); b.restaurant.removeAllListeners(); }
+});
