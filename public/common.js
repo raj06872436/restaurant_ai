@@ -35,7 +35,7 @@ window.TS = (() => {
     };
   }
   function nav(current) {
-    const links = [['/staff', 'Floor & alerts'], ['/kitchen', 'Kitchen'], ['/owner', 'Owner'], ['/qr', 'QR codes']];
+    const links = [['/staff', 'Floor & alerts'], ['/kitchen', 'Kitchen'], ['/owner', 'Owner'], ['/qr', 'QR codes'], ['/settings', 'Menu & settings']];
     return `<nav class="top"><h1>TableSense</h1><div class="chips">${links.map(([h, l]) => `<a href="${h}" class="${h === current ? 'on' : ''}">${l}</a>`).join('')}</div></nav>`;
   }
   function live(onUpdate, auth) {

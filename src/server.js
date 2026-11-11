@@ -56,6 +56,16 @@ function createApp({
   app.post('/api/guest/:table/call', wrap(req => r.callWaiter(guestTable(req).id, req.body.reason)));
   app.post('/api/guest/:table/pay', wrap(req => r.pay(guestTable(req).id, req.body)));
 
+  app.get('/api/guest/:table/upi/:pid.svg', async (req, res) => {
+    try {
+      const t = guestTable(req);
+      const v = r.visit(t.visitId);
+      const p = v && v.payments.find(x => x.id === req.params.pid && x.upiLink);
+      if (!p) throw httpError(404, 'Payment not found');
+      res.type('image/svg+xml').send(await QRCode.toString(p.upiLink, { type: 'svg', margin: 1 }));
+    } catch (e) { res.status(e.status || 500).send(e.message); }
+  });
+
   /* ---------- camera ---------- */
   app.post('/api/camera', wrap(req => {
     if (req.get('x-camera-key') !== cameraKey) throw httpError(401, 'Wrong camera key.');
@@ -75,13 +85,8 @@ function createApp({
   app.post('/api/tables/:table/payments/:pid/confirm', staffOnly, wrap(req => r.confirmPayment(req.params.table, req.params.pid)));
   app.post('/api/orders/:id/advance', staffOnly, wrap(req => r.advanceOrder(req.params.id, req.body.status)));
   app.get('/api/stats', staffOnly, wrap(() => r.stats()));
-  app.put('/api/menu', staffOnly, wrap(req => {
-    const menu = req.body.menu;
-    if (!Array.isArray(menu)) throw httpError(400, 'Send the full menu list.');
-    r.d.menu = menu.map(m => ({ id: String(m.id), cat: String(m.cat || 'Other'), name: String(m.name), desc: String(m.desc || ''), price: Math.max(0, Math.round(+m.price || 0)), hidden: !!m.hidden }));
-    r.changed();
-    return r.d.menu;
-  }));
+  app.put('/api/menu', staffOnly, wrap(req => r.setMenu(req.body.menu)));
+  app.put('/api/settings', staffOnly, wrap(req => r.updateSettings(req.body)));
   app.get('/api/qr/:table.svg', staffOnly, async (req, res) => {
     try {
       const t = r.table(req.params.table);
@@ -97,6 +102,7 @@ function createApp({
   app.get('/kitchen', page('kitchen.html'));
   app.get('/owner', page('owner.html'));
   app.get('/qr', page('qr.html'));
+  app.get('/settings', page('settings.html'));
   app.get('/', (req, res) => res.redirect('/staff'));
   app.use(express.static(path.join(__dirname, '..', 'public')));
 

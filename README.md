@@ -32,12 +32,21 @@ Then open:
 - `http://localhost:3000/kitchen` kitchen screen
 - `http://localhost:3000/owner` owner dashboard
 - `http://localhost:3000/qr` printable QR codes, one per table
+- `http://localhost:3000/settings` menu editor (add dishes, change prices, mark veg, hide a dish when it runs out) and restaurant settings (name, currency, Wi-Fi, alert times, ways to pay, tables)
 
 Staff pages ask for the PIN (default `1234`). Each QR code carries a secret key for its own table, so a guest can only order for the table they're sitting at.
 
 Set `PUBLIC_URL` to the address guests' phones will reach (for example `http://192.168.1.10:3000` on the restaurant Wi-Fi, or your domain) before printing QR codes.
 
-Data is saved to `data/db.json`. Menu, table count, Wi-Fi details and alert times are in that file under `settings`, `menu` and `tables` (the menu can also be replaced with `PUT /api/menu`).
+Data is saved to `data/db.json`.
+
+## Payments
+
+Guests choose from the ways to pay switched on in settings: cash, card, UPI and bank transfer.
+
+- **UPI** works with no payment gateway: enter the restaurant's UPI ID in settings, and guests get a button that opens their UPI app (GPay, PhonePe, Paytm) and a QR code, both filled in with the exact amount and table. The money goes straight to that UPI ID.
+- Every payment shows on the floor screen for staff to confirm once it arrives. Sales on the owner dashboard count confirmed payments only.
+- A gateway such as Razorpay can later confirm UPI and card payments automatically (see Not built yet).
 
 ## Connect the cameras
 
@@ -71,7 +80,7 @@ npm test
 
 ## Not built yet
 
-- Online payments go to staff for confirmation. A gateway (JazzCash, Easypaisa, card) still needs wiring in `Restaurant.pay`.
-- Menu editing screen (the API exists), photos per dish, and an Urdu/English toggle.
+- Automatic payment confirmation through a gateway (for example Razorpay). Today staff confirm each payment by hand.
+- Photos per dish, and a Hindi/English toggle.
 - Multiple restaurants or branches, user accounts per waiter, and a real database (the JSON file is fine for one branch).
 - The camera connector has not been run against a live CCTV feed yet. Expect to tune the zones and the confidence threshold on site.
