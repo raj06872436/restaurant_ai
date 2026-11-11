@@ -8,6 +8,8 @@
 .cats{position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:2;overflow-x:auto;flex-wrap:nowrap}
 .dish{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 .dish small{display:block;color:var(--muted);font-size:.8rem}
+.dish .dn{flex:1;min-width:0}
+.dish .pic{width:64px;height:64px;border-radius:10px;object-fit:cover;flex:none}
 .qty{font-family:var(--f-mono);min-width:1.6em;text-align:center}
 .bar{position:fixed;left:0;right:0;bottom:0;padding:12px max(16px,env(safe-area-inset-left)) calc(12px + env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line)}
 .bar .in{max-width:520px;margin:0 auto;display:flex;gap:8px}
@@ -16,6 +18,7 @@
 .steps{display:flex;gap:4px}.steps span{flex:1;height:6px;border-radius:3px;background:var(--line)}.steps span.on{background:var(--accent)}
 .big{font-family:var(--f-display);font-size:1.6rem}
 .tabs{display:flex;gap:6px}
+:lang(hi) .tag{letter-spacing:0;text-transform:none;font-family:var(--f-body);font-size:.78rem}
 .veg{display:inline-block;width:11px;height:11px;border:1.5px solid var(--free);border-radius:2px;margin-right:6px;vertical-align:-1px;background:radial-gradient(circle,var(--free) 35%,transparent 40%)}
 </style></head>
 <body>
@@ -30,74 +33,119 @@ const key = new URLSearchParams(location.search).get('k') || '';
 const H = { 'x-table-key': key };
 let view = null, cart = {}, tab = 'menu', cat = null, split = 1, tip = 10, method = null, busy = false, upi = null;
 
+/* ---------- English / Hindi ---------- */
+const WORDS = {
+  en: {
+    table: 'Table', call: 'Call waiter', coming: 'Waiter is coming ✓', menu: 'Menu', myOrder: 'My order', bill: 'Bill & pay',
+    veg: 'Vegetarian', removeOne: 'Remove one', addOne: 'Add one', send: n => `Send ${n} item${n > 1 ? 's' : ''} to kitchen`,
+    noOrder: "You haven't ordered yet. Pick dishes from the menu.", order: 'Order',
+    st: { new: 'The kitchen has your order', cooking: 'Your food is cooking', ready: 'Your food is on its way', served: 'Enjoy your meal' },
+    stShort: { new: 'received', cooking: 'cooking', ready: 'on its way', served: 'served', cancelled: 'cancelled' },
+    wifi: 'Guest Wi-Fi', copy: 'Copy password', copied: 'Password copied.',
+    payUpi: a => `Pay ${a} by UPI`, openUpi: 'Open UPI app', upiHelp: 'On this phone tap the button. On another phone scan the code. Staff will confirm when it arrives.', done: 'Done',
+    billLater: 'Your bill will show here after you order.', confirming: 'Payment sent. Staff are confirming it.', paid: 'Paid in full. Thank you!',
+    totalTip: (t, tip) => `Total ${t}${tip ? `, tip ${tip}` : ''}.`, total: 'Total', already: 'Already paid', left: 'Left to pay',
+    split: 'Split', whole: 'Whole bill', ways: n => `${n} ways`, tip: 'Tip', payWith: 'Pay with', share: 'Your share', toPay: 'To pay',
+    how: { cash: 'A waiter will come to collect it.', card: 'A waiter will bring the card machine.', upi: 'You will get a UPI link and QR code to pay from any UPI app.', bank: 'Staff will confirm when your transfer arrives.' },
+    pay: a => `Pay ${a}`, waiterOnWay: 'A waiter is on the way.', sent: 'Order sent to the kitchen.',
+    collect: 'A waiter is coming to collect your payment.', noted: 'Payment noted. Staff will confirm it.',
+    cantOpen: "Can't open this table", methods: { cash: 'Cash', card: 'Card', upi: 'UPI', bank: 'Bank transfer' }, lang: 'हिंदी',
+  },
+  hi: {
+    table: 'टेबल', call: 'वेटर बुलाएं', coming: 'वेटर आ रहे हैं ✓', menu: 'मेन्यू', myOrder: 'मेरा ऑर्डर', bill: 'बिल और भुगतान',
+    veg: 'शाकाहारी', removeOne: 'एक हटाएं', addOne: 'एक जोड़ें', send: n => `${n} आइटम किचन भेजें`,
+    noOrder: 'आपने अभी ऑर्डर नहीं किया है। मेन्यू से डिश चुनें।', order: 'ऑर्डर',
+    st: { new: 'किचन को आपका ऑर्डर मिल गया', cooking: 'आपका खाना बन रहा है', ready: 'आपका खाना आ रहा है', served: 'खाने का आनंद लें' },
+    stShort: { new: 'मिला', cooking: 'बन रहा है', ready: 'आ रहा है', served: 'परोसा गया', cancelled: 'रद्द' },
+    wifi: 'मेहमान Wi-Fi', copy: 'पासवर्ड कॉपी करें', copied: 'पासवर्ड कॉपी हो गया।',
+    payUpi: a => `UPI से ${a} भुगतान करें`, openUpi: 'UPI ऐप खोलें', upiHelp: 'इसी फ़ोन पर बटन दबाएं। दूसरे फ़ोन से कोड स्कैन करें। पैसे मिलने पर स्टाफ़ पुष्टि करेगा।', done: 'हो गया',
+    billLater: 'ऑर्डर के बाद आपका बिल यहाँ दिखेगा।', confirming: 'भुगतान भेजा गया। स्टाफ़ पुष्टि कर रहा है।', paid: 'पूरा भुगतान हो गया। धन्यवाद!',
+    totalTip: (t, tip) => `कुल ${t}${tip ? `, टिप ${tip}` : ''}।`, total: 'कुल', already: 'पहले से भुगतान', left: 'बाकी भुगतान',
+    split: 'बिल बाँटें', whole: 'पूरा बिल', ways: n => `${n} हिस्से`, tip: 'टिप', payWith: 'भुगतान का तरीका', share: 'आपका हिस्सा', toPay: 'भुगतान',
+    how: { cash: 'वेटर नकद लेने आएंगे।', card: 'वेटर कार्ड मशीन लाएंगे।', upi: 'आपको किसी भी UPI ऐप से भुगतान के लिए लिंक और QR कोड मिलेगा।', bank: 'ट्रांसफ़र मिलने पर स्टाफ़ पुष्टि करेगा।' },
+    pay: a => `${a} भुगतान करें`, waiterOnWay: 'वेटर आ रहे हैं।', sent: 'ऑर्डर किचन भेज दिया गया।',
+    collect: 'वेटर भुगतान लेने आ रहे हैं।', noted: 'भुगतान दर्ज हुआ। स्टाफ़ पुष्टि करेगा।',
+    cantOpen: 'यह टेबल नहीं खुल सकी', methods: { cash: 'नकद', card: 'कार्ड', upi: 'UPI', bank: 'बैंक ट्रांसफ़र' }, lang: 'English',
+  },
+};
+let lang = 'en';
+try { lang = localStorage.getItem('ts_lang') || ((navigator.language || '').startsWith('hi') ? 'hi' : 'en'); } catch {}
+const W = () => WORDS[lang] || WORDS.en;
+const dishName = m => (lang === 'hi' && m.nameHi) || m.name;
+const lineName = l => { const m = view.menu.find(x => x.id === l.id); return m ? dishName(m) : l.name; };
+
 async function load() {
   try {
     view = await api(`/api/guest/${tableId}`, { headers: H }); TS.setCurrency(view.currency);
     if (!view.payMethods.some(m => m.id === method)) method = view.payMethods[0] && view.payMethods[0].id;
     render();
   }
-  catch (e) { document.getElementById('app').innerHTML = `<h3>Can't open this table</h3><p class="muted">${esc(e.message)}</p>`; }
+  catch (e) { document.getElementById('app').innerHTML = `<h3>${W().cantOpen}</h3><p class="muted">${esc(e.message)}</p>`; }
 }
-const cartLines = () => Object.entries(cart).filter(([, q]) => q > 0).map(([id, qty]) => ({ ...view.menu.find(m => m.id === id), qty }));
+const cartLines = () => Object.entries(cart).filter(([, q]) => q > 0).map(([id, qty]) => ({ ...view.menu.find(m => m.id === id), qty })).filter(l => l.id);
 const shareOf = bill => Math.min(Math.ceil(bill.total / split), bill.due);
 const cartTotal = () => cartLines().reduce((a, l) => a + l.price * l.qty, 0);
 
 function statusOf() {
-  const open = view.orders.filter(o => ['new', 'cooking', 'ready'].includes(o.status));
+  const flow = ['new', 'cooking', 'ready'];
+  const open = view.orders.filter(o => flow.includes(o.status));
   if (!view.orders.length) return null;
-  const st = open.length ? open.reduce((a, o) => ['new', 'cooking', 'ready'].indexOf(o.status) < ['new', 'cooking', 'ready'].indexOf(a) ? o.status : a, 'ready') : 'served';
-  return { st, step: { new: 1, cooking: 2, ready: 3, served: 4 }[st], words: { new: 'The kitchen has your order', cooking: 'Your food is cooking', ready: 'Your food is on its way', served: 'Enjoy your meal' }[st] };
+  const st = open.length ? open.reduce((a, o) => flow.indexOf(o.status) < flow.indexOf(a) ? o.status : a, 'ready') : 'served';
+  return { st, step: { new: 1, cooking: 2, ready: 3, served: 4 }[st], words: W().st[st] };
 }
 
 function render() {
-  const app = document.getElementById('app'), bar = document.getElementById('bar'), barIn = document.getElementById('barIn');
+  const w = W(), app = document.getElementById('app'), bar = document.getElementById('bar'), barIn = document.getElementById('barIn');
   const s = statusOf(), bill = view.bill;
+  document.documentElement.lang = lang;
   document.title = `${view.restaurant} · ${view.table.id}`;
-  let h = `<div class="row"><div><div class="tag">${esc(view.restaurant)}</div><h1>Table ${esc(view.table.id.replace(/^T/, ''))}</h1></div>
-    <button class="mini" data-act="call" ${view.waiterCalled ? 'disabled' : ''}>${view.waiterCalled ? 'Waiter is coming ✓' : 'Call waiter'}</button></div>
-    <div class="tabs chips"><button class="chip ${tab === 'menu' ? 'sel' : ''}" data-tab="menu">Menu</button>
-    <button class="chip ${tab === 'order' ? 'sel' : ''}" data-tab="order">My order${view.orders.length ? ' ✓' : ''}</button>
-    <button class="chip ${tab === 'bill' ? 'sel' : ''}" data-tab="bill">Bill & pay</button></div>`;
+  let h = `<div class="row"><div><div class="tag">${esc(view.restaurant)}</div><h1>${w.table} ${esc(view.table.id.replace(/^T/, ''))}</h1></div>
+    <div class="row"><button class="mini" data-act="lang">${w.lang}</button>
+    <button class="mini" data-act="call" ${view.waiterCalled ? 'disabled' : ''}>${view.waiterCalled ? w.coming : w.call}</button></div></div>
+    <div class="tabs chips"><button class="chip ${tab === 'menu' ? 'sel' : ''}" data-tab="menu">${w.menu}</button>
+    <button class="chip ${tab === 'order' ? 'sel' : ''}" data-tab="order">${w.myOrder}${view.orders.length ? ' ✓' : ''}</button>
+    <button class="chip ${tab === 'bill' ? 'sel' : ''}" data-tab="bill">${w.bill}</button></div>`;
   if (tab === 'menu') {
     const cats = [...new Set(view.menu.map(m => m.cat))];
-    cat = cat || cats[0];
+    if (!cats.includes(cat)) cat = cats[0];
     h += `<div class="chips cats">${cats.map(c => `<button class="chip ${c === cat ? 'sel' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>`;
-    h += view.menu.filter(m => m.cat === cat).map(m => `<div class="dish"><div>${m.veg ? '<span class="veg" title="Vegetarian" aria-label="Vegetarian"></span>' : ''}${esc(m.name)}<small>${esc(m.desc)}${m.desc ? ' · ' : ''}${money(m.price)}</small></div>
-      <div class="row"><button class="mini" data-dec="${esc(m.id)}" aria-label="Remove one ${esc(m.name)}">−</button><span class="qty">${cart[m.id] || 0}</span>
-      <button class="mini" data-inc="${esc(m.id)}" aria-label="Add one ${esc(m.name)}">+</button></div></div>`).join('');
+    h += view.menu.filter(m => m.cat === cat).map(m => `<div class="dish">${m.photo ? `<img class="pic" src="${esc(m.photo)}" alt="" loading="lazy">` : ''}
+      <div class="dn">${m.veg ? `<span class="veg" title="${w.veg}" aria-label="${w.veg}"></span>` : ''}${esc(dishName(m))}<small>${esc(m.desc)}${m.desc ? ' · ' : ''}${money(m.price)}</small></div>
+      <div class="row"><button class="mini" data-dec="${esc(m.id)}" aria-label="${w.removeOne}: ${esc(dishName(m))}">−</button><span class="qty">${cart[m.id] || 0}</span>
+      <button class="mini" data-inc="${esc(m.id)}" aria-label="${w.addOne}: ${esc(dishName(m))}">+</button></div></div>`).join('');
     const n = cartLines().reduce((a, l) => a + l.qty, 0);
     bar.hidden = !n;
-    barIn.innerHTML = `<button class="primary" data-act="send" ${busy ? 'disabled' : ''}>Send ${n} item${n > 1 ? 's' : ''} to kitchen · ${money(cartTotal())}</button>`;
+    barIn.innerHTML = `<button class="primary" data-act="send" ${busy ? 'disabled' : ''}>${w.send(n)} · ${money(cartTotal())}</button>`;
   } else if (tab === 'order') {
     bar.hidden = true;
-    if (!s) h += `<p class="muted">You haven't ordered yet. Pick dishes from the menu.</p>`;
+    if (!s) h += `<p class="muted">${w.noOrder}</p>`;
     else {
       h += `<h3>${s.words}</h3><div class="steps">${[1, 2, 3, 4].map(i => `<span class="${i <= s.step ? 'on' : ''}"></span>`).join('')}</div>`;
-      h += view.orders.map(o => `<div class="box"><div class="row"><span class="tag">Order ${esc(o.id)} · ${esc(o.status)}</span><b>${money(o.total)}</b></div>
-        ${o.lines.map(l => `<div class="row"><span>${esc(l.name)} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></div>`).join('')}</div>`).join('');
+      h += view.orders.map(o => `<div class="box"><div class="row"><span class="tag">${w.order} ${esc(o.id)} · ${esc(w.stShort[o.status] || o.status)}</span><b>${money(o.total)}</b></div>
+        ${o.lines.map(l => `<div class="row"><span>${esc(lineName(l))} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></div>`).join('')}</div>`).join('');
     }
-    h += `<div class="box"><span class="tag">Guest Wi-Fi</span><div class="row"><span>${esc(view.wifi.network)}</span><span style="font-family:var(--f-mono)">${esc(view.wifi.password)}</span></div>
-      <button class="mini" data-act="copywifi">Copy password</button></div>`;
+    h += `<div class="box"><span class="tag">${w.wifi}</span><div class="row"><span>${esc(view.wifi.network)}</span><span style="font-family:var(--f-mono)">${esc(view.wifi.password)}</span></div>
+      <button class="mini" data-act="copywifi">${w.copy}</button></div>`;
   } else {
     bar.hidden = true;
-    if (upi) h += `<div class="box" style="text-align:center"><h3>Pay ${money(upi.total)} by UPI</h3>
-      <img src="/api/guest/${tableId}/upi/${upi.pid}.svg?k=${encodeURIComponent(key)}" alt="UPI QR code" style="width:200px;max-width:100%;margin:0 auto;background:#fff;padding:6px;border-radius:8px">
-      <a href="${esc(upi.link)}" style="display:block"><button class="primary" style="width:100%">Open UPI app</button></a>
-      <span class="muted" style="font-size:.85rem">On this phone tap the button. On another phone scan the code. Staff will confirm when it arrives.</span>
-      <button class="mini" data-act="upidone">Done</button></div>`;
-    if (!bill || !bill.total) h += `<p class="muted">Your bill will show here after you order.</p>`;
-    else if (!bill.due) h += `<div class="box"><h3>${bill.unconfirmed ? 'Payment sent. Staff are confirming it.' : 'Paid in full. Thank you!'}</h3><p class="muted" style="margin:0">Total ${money(bill.total)}${bill.tips ? `, tip ${money(bill.tips)}` : ''}.</p></div>`;
+    if (upi) h += `<div class="box" style="text-align:center"><h3>${w.payUpi(money(upi.total))}</h3>
+      <img src="/api/guest/${tableId}/upi/${upi.pid}.svg?k=${encodeURIComponent(key)}" alt="UPI QR" style="width:200px;max-width:100%;margin:0 auto;background:#fff;padding:6px;border-radius:8px">
+      <a href="${esc(upi.link)}" style="display:block"><button class="primary" style="width:100%">${w.openUpi}</button></a>
+      <span class="muted" style="font-size:.85rem">${w.upiHelp}</span>
+      <button class="mini" data-act="upidone">${w.done}</button></div>`;
+    if (!bill || !bill.total) h += `<p class="muted">${w.billLater}</p>`;
+    else if (!bill.due) h += `<div class="box"><h3>${bill.unconfirmed ? w.confirming : w.paid}</h3><p class="muted" style="margin:0">${w.totalTip(money(bill.total), bill.tips ? money(bill.tips) : '')}</p></div>`;
     else {
       const share = shareOf(bill), shareTip = Math.round(share * tip / 100);
-      h += `<div class="box">${bill.lines.map(l => `<div class="row"><span>${esc(l.name)} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></div>`).join('')}
-        <div class="row"><b>Total</b><b class="num">${money(bill.total)}</b></div>${bill.paid ? `<div class="row"><span>Already paid</span><span class="num">− ${money(bill.paid)}</span></div><div class="row"><b>Left to pay</b><b>${money(bill.due)}</b></div>` : ''}</div>
-        <span class="tag">Split</span><div class="chips">${[1, 2, 3, 4, 5, 6].map(n => `<button class="chip ${split === n ? 'sel' : ''}" data-split="${n}">${n === 1 ? 'Whole bill' : n + ' ways'}</button>`).join('')}</div>
-        <span class="tag">Tip</span><div class="chips">${[0, 5, 10, 15].map(n => `<button class="chip ${tip === n ? 'sel' : ''}" data-tip="${n}">${n}%</button>`).join('')}</div>
-        <span class="tag">Pay with</span><div class="chips">${view.payMethods.map(m => `<button class="chip ${method === m.id ? 'sel' : ''}" data-method="${m.id}">${esc(m.label)}</button>`).join('')}</div>
-        <div class="box"><div class="row"><span>${split > 1 ? 'Your share' : 'To pay'}</span><span class="big num">${money(share + shareTip)}</span></div>
-        <span class="muted" style="font-size:.85rem">${{ cash: 'A waiter will come to collect it.', card: 'A waiter will bring the card machine.', upi: 'You will get a UPI link and QR code to pay from any UPI app.', bank: 'Staff will confirm when your transfer arrives.' }[method] || ''}</span></div>`;
+      h += `<div class="box">${bill.lines.map(l => `<div class="row"><span>${esc(lineName(l))} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></div>`).join('')}
+        <div class="row"><b>${w.total}</b><b class="num">${money(bill.total)}</b></div>${bill.paid ? `<div class="row"><span>${w.already}</span><span class="num">− ${money(bill.paid)}</span></div><div class="row"><b>${w.left}</b><b>${money(bill.due)}</b></div>` : ''}</div>
+        <span class="tag">${w.split}</span><div class="chips">${[1, 2, 3, 4, 5, 6].map(n => `<button class="chip ${split === n ? 'sel' : ''}" data-split="${n}">${n === 1 ? w.whole : w.ways(n)}</button>`).join('')}</div>
+        <span class="tag">${w.tip}</span><div class="chips">${[0, 5, 10, 15].map(n => `<button class="chip ${tip === n ? 'sel' : ''}" data-tip="${n}">${n}%</button>`).join('')}</div>
+        <span class="tag">${w.payWith}</span><div class="chips">${view.payMethods.map(m => `<button class="chip ${method === m.id ? 'sel' : ''}" data-method="${m.id}">${esc(w.methods[m.id] || m.label)}</button>`).join('')}</div>
+        <div class="box"><div class="row"><span>${split > 1 ? w.share : w.toPay}</span><span class="big num">${money(share + shareTip)}</span></div>
+        <span class="muted" style="font-size:.85rem">${w.how[method] || ''}</span></div>`;
       bar.hidden = false;
-      barIn.innerHTML = `<button class="primary" data-act="pay" ${busy ? 'disabled' : ''}>Pay ${money(share + shareTip)}</button>`;
+      barIn.innerHTML = `<button class="primary" data-act="pay" ${busy ? 'disabled' : ''}>${w.pay(money(share + shareTip))}</button>`;
     }
   }
   app.innerHTML = h;
@@ -105,7 +153,7 @@ function render() {
 
 document.addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b || busy) return;
-  const d = b.dataset;
+  const d = b.dataset, w = W();
   if (d.tab) tab = d.tab;
   if (d.cat) cat = d.cat;
   if (d.inc) cart[d.inc] = (cart[d.inc] || 0) + 1;
@@ -114,20 +162,21 @@ document.addEventListener('click', async e => {
   if (d.tip) tip = +d.tip;
   if (d.method) method = d.method;
   try {
+    if (d.act === 'lang') { lang = lang === 'hi' ? 'en' : 'hi'; try { localStorage.setItem('ts_lang', lang); } catch {} render(); return; }
     if (d.act === 'upidone') { upi = null; render(); return; }
-    if (d.act === 'call') { await api(`/api/guest/${tableId}/call`, { headers: H, body: { reason: 'help' } }); toast('A waiter is on the way.'); await load(); return; }
-    if (d.act === 'copywifi') { try { await navigator.clipboard.writeText(view.wifi.password); toast('Password copied.'); } catch { toast(view.wifi.password); } return; }
+    if (d.act === 'call') { await api(`/api/guest/${tableId}/call`, { headers: H, body: { reason: 'help' } }); toast(w.waiterOnWay); await load(); return; }
+    if (d.act === 'copywifi') { try { await navigator.clipboard.writeText(view.wifi.password); toast(w.copied); } catch { toast(view.wifi.password); } return; }
     if (d.act === 'send') {
       busy = true; render();
       await api(`/api/guest/${tableId}/order`, { headers: H, body: { items: cartLines().map(l => ({ id: l.id, qty: l.qty })) } });
-      cart = {}; tab = 'order'; toast('Order sent to the kitchen.');
+      cart = {}; tab = 'order'; toast(w.sent);
     }
     if (d.act === 'pay') {
       busy = true; render();
       const share = shareOf(view.bill);
       const res = await api(`/api/guest/${tableId}/pay`, { headers: H, body: { amount: share, tip: Math.round(share * tip / 100), method } });
       if (res.payment.upiLink) upi = { pid: res.payment.id, link: res.payment.upiLink, total: res.payment.amount + res.payment.tip };
-      else toast(method === 'cash' || method === 'card' ? 'A waiter is coming to collect your payment.' : 'Payment noted. Staff will confirm it.');
+      else toast(method === 'cash' || method === 'card' ? w.collect : w.noted);
     }
   } catch (err) { toast(err.message); }
   busy = false;

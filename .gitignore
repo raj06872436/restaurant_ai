@@ -3,3 +3,5 @@ data/
 camera/tables.json
 *.pt
 __pycache__/
+.env
+camera/models/

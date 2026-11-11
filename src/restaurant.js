@@ -143,7 +143,7 @@ class Restaurant extends EventEmitter {
     const tips = v.payments.reduce((a, p) => a + (p.tip || 0), 0);
     const lines = {};
     for (const o of orders) for (const l of o.lines) {
-      lines[l.id] = lines[l.id] || { name: l.name, price: l.price, qty: 0 };
+      lines[l.id] = lines[l.id] || { id: l.id, name: l.name, price: l.price, qty: 0 };
       lines[l.id].qty += l.qty;
     }
     const unconfirmed = v.payments.filter(p => !p.confirmed).reduce((a, p) => a + p.amount + (p.tip || 0), 0);
@@ -237,7 +237,9 @@ class Restaurant extends EventEmitter {
       ids.add(id);
       const price = Math.round(Number(m.price));
       if (!(price >= 0)) throw httpError(400, `Enter a price for ${name}.`);
-      return { id, cat: String(m.cat || 'Other').trim().slice(0, 30) || 'Other', name, desc: String(m.desc || '').trim().slice(0, 140), price, hidden: !!m.hidden, veg: !!m.veg };
+      const photo = /^\/photos\/[a-f0-9]{16}\.(jpg|png|webp)$/.test(m.photo || '') ? m.photo : '';
+      const nameHi = String(m.nameHi || '').trim().slice(0, 60);
+      return { id, cat: String(m.cat || 'Other').trim().slice(0, 30) || 'Other', name, nameHi, desc: String(m.desc || '').trim().slice(0, 140), price, hidden: !!m.hidden, veg: !!m.veg, photo };
     });
     this.changed();
     return this.d.menu;
