@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>TableSense · Kitchen</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="/app.css">
+<style>
+.cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
+@media (max-width:760px){.cols{grid-template-columns:minmax(0,1fr)}}
+.col{display:grid;gap:10px}
+.ticket{border:1px solid var(--line);border-top:4px solid var(--c);border-radius:10px;padding:12px;background:var(--panel);display:grid;gap:6px}
+.ticket .line{display:flex;gap:8px;font-size:1rem}.ticket .q{font-family:var(--f-mono);font-weight:600;min-width:2em}
+.late{color:var(--dirty);font-weight:600}
+</style></head>
+<body>
+<div class="wrap" id="root"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common.js"></script>
+<script>
+const { esc, api, toast, ago } = TS;
+const COLS = [['new', 'New', '--ordered', 'Start cooking'], ['cooking', 'Cooking', '--saffron', 'Mark ready'], ['ready', 'Ready to serve', '--free', 'Served']];
+async function load() {
+  const data = await api('/api/staff');
+  document.getElementById('root').innerHTML = `${TS.nav('/kitchen')}<div class="cols">${COLS.map(([st, title, c, btn]) => {
+    const list = data.orders.filter(o => o.status === st).sort((a, b) => a.at - b.at);
+    return `<section class="col"><div class="ph"><h2>${title}</h2><span class="tag">${list.length}</span></div>
+      ${list.map(o => { const mins = Math.floor((Date.now() - o.at) / 60000);
+        return `<div class="ticket" style="--c:var(${c})"><div class="row"><b>${esc(o.tableId)}</b><span class="tag ${mins >= 20 && st !== 'ready' ? 'late' : ''}">${ago(o.at)}</span></div>
+        ${o.lines.map(l => `<div class="line"><span class="q">${l.qty}×</span><span>${esc(l.name)}${l.note ? `<br><small class="muted">${esc(l.note)}</small>` : ''}</span></div>`).join('')}
+        <button class="primary" data-adv="${o.id}">${btn}</button></div>`; }).join('') || '<div class="empty">Nothing here.</div>'}</section>`;
+  }).join('')}</div>`;
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-adv]'); if (!b) return;
+  try { await api(`/api/orders/${b.dataset.adv}/advance`, { body: {} }); await load(); } catch (err) { toast(err.message); }
+});
+TS.staffGate(() => TS.live(load));
+</script>
+</body></html>

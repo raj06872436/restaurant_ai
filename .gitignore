@@ -1,0 +1,5 @@
+node_modules/
+data/
+camera/tables.json
+*.pt
+__pycache__/

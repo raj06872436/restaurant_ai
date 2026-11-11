@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>TableSense · QR codes</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="/app.css">
+<style>
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+.card{border:1px dashed var(--line);border-radius:12px;padding:16px;text-align:center;background:#fff;color:#1d2420;break-inside:avoid}
+.card img{width:100%;max-width:180px}
+@media print{nav,.hint{display:none}body{background:#fff}}
+</style></head>
+<body>
+<div class="wrap" id="root"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common.js"></script>
+<script>
+TS.staffGate(async () => {
+  const d = await TS.api('/api/staff');
+  document.getElementById('root').innerHTML = `${TS.nav('/qr')}
+    <p class="hint muted">Print this page and stick one code on each table. Each code only opens its own table. Open a code's link to test it.</p>
+    <div class="cards">${d.tables.map(t => `<div class="card"><img src="/api/qr/${t.id}.svg" alt="QR code for table ${TS.esc(t.id)}">
+      <div style="font-weight:600">Scan for menu · Table ${TS.esc(t.id.replace(/^T/, ''))}</div>
+      <a class="hint" href="/t/${t.id}?k=${t.key}" target="_blank">Open ${TS.esc(t.id)}</a></div>`).join('')}</div>`;
+});
+</script>
+</body></html>

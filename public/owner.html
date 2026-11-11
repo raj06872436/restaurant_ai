@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>TableSense · Owner</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="/app.css">
+<style>
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+.kpi{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel)}
+.kpi .v{font-family:var(--f-display);font-size:1.6rem;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:.8rem;color:var(--muted)}
+.two{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:18px}
+@media (max-width:800px){.two{grid-template-columns:minmax(0,1fr)}}
+.bars{display:flex;align-items:end;gap:4px;height:140px;border-bottom:1px solid var(--line)}
+.bars div{flex:1;background:var(--accent-soft);border-radius:3px 3px 0 0}
+.bars div.peak{background:var(--saffron)}
+.hours{display:flex;gap:4px;font-family:var(--f-mono);font-size:.6rem;color:var(--muted);margin-top:4px}.hours span{flex:1;text-align:center}
+.insight{margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--accent-soft);font-size:.9rem}
+</style></head>
+<body>
+<div class="wrap" id="root"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common.js"></script>
+<script>
+const { esc, money, api } = TS;
+async function load() {
+  const s = await api('/api/stats');
+  const first = s.byHour.findIndex(v => v > 0);
+  const hrs = s.byHour.map((v, h) => ({ v, h })).slice(first >= 0 ? Math.min(first, 11) : 11, 24); // from opening (or 11 AM) to midnight
+  const max = Math.max(1, ...hrs.map(x => x.v)), peak = hrs.reduce((a, b) => (b.v > a.v ? b : a), hrs[0]);
+  const lbl = h => `${h % 12 || 12}${h < 12 ? 'a' : 'p'}`;
+  const tips = [];
+  if (s.noOrderAlerts) tips.push(`${s.noOrderAlerts} time${s.noOrderAlerts > 1 ? 's' : ''} today guests sat for over 5 minutes with no waiter. Add a waiter around ${lbl(peak.h)}.`);
+  if (s.avgMinToOrder != null) tips.push(`Guests take ${s.avgMinToOrder} min on average from sitting down to ordering.`);
+  if (s.walkouts) tips.push(`${s.walkouts} table${s.walkouts > 1 ? 's' : ''} left with an unpaid bill.`);
+  document.getElementById('root').innerHTML = `${TS.nav('/owner')}
+    <div class="kpis">
+      <div class="kpi"><div class="v">${money(s.sales)}</div><div class="l">Sales today (confirmed)${s.awaitingConfirm ? ` · ${money(s.awaitingConfirm)} waiting for staff to confirm` : ''}</div></div>
+      <div class="kpi"><div class="v">${money(s.tips)}</div><div class="l">Tips for staff</div></div>
+      <div class="kpi"><div class="v">${s.tablesInUse}/${s.tables}</div><div class="l">Tables in use now</div></div>
+      <div class="kpi"><div class="v">${s.guests}</div><div class="l">Guests today</div></div>
+      <div class="kpi"><div class="v">${s.avgMinToOrder ?? '–'}</div><div class="l">Avg. minutes until first order</div></div>
+      <div class="kpi"><div class="v">${s.avgStayMin ?? '–'}</div><div class="l">Avg. minutes per table</div></div>
+      <div class="kpi"><div class="v">${s.turnovers}</div><div class="l">Tables turned over</div></div>
+      <div class="kpi"><div class="v">${s.noOrderAlerts}</div><div class="l">Guests left waiting 5+ min</div></div>
+    </div>
+    <div class="two">
+      <section class="panel"><div class="ph"><h2>Guests per hour</h2><span class="tag">From camera + QR</span></div>
+        <div class="bars">${hrs.map(x => `<div class="${x === peak && x.v ? 'peak' : ''}" style="height:${Math.max(1, x.v / max * 100)}%" title="${lbl(x.h)}: ${x.v} guests"></div>`).join('')}</div>
+        <div class="hours">${hrs.map(x => `<span>${lbl(x.h)}</span>`).join('')}</div>
+        <div class="insight">${tips.map(esc).join('<br>') || 'Numbers fill in as guests arrive today.'}</div></section>
+      <section class="panel"><div class="ph"><h2>Top dishes</h2><span class="tag">Today</span></div>
+        ${s.topItems.map(i => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><span>${esc(i.name)}</span><b class="num">${i.qty}</b></div>`).join('') || '<div class="empty">No orders yet.</div>'}</section>
+    </div>`;
+}
+TS.staffGate(() => TS.live(load));
+</script>
+</body></html>
