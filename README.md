@@ -72,11 +72,29 @@ Data is saved to `data/db.json`.
 
 ## Payments
 
-Guests choose from the ways to pay switched on in settings: cash, card, UPI and bank transfer.
+Guests choose from the ways to pay switched on in settings: online (Razorpay), cash, card, UPI and bank transfer.
+
+### Razorpay (online, confirms itself)
+
+Guests tap **Pay online** and Razorpay's own checkout opens on their phone: any UPI app, cards, netbanking or wallets. When the payment goes through, the bill is marked paid by itself and the floor screen shows "paid online, no action needed". Staff never confirm these.
+
+1. In the [Razorpay dashboard](https://dashboard.razorpay.com) go to **Account & Settings → API Keys** and generate a key. Start with **Test mode** keys (`rzp_test_...`): no real money moves.
+2. Put them in the `.env` file on the machine that runs the app (never in chat, email or the code):
+   ```
+   RAZORPAY_KEY_ID=rzp_test_xxxxxxxx
+   RAZORPAY_KEY_SECRET=xxxxxxxxxxxxxxxx
+   ```
+3. Add a webhook so a payment still counts if the guest closes the page right after paying: **Account & Settings → Webhooks → Add**, URL `https://<your address>/api/razorpay/webhook`, events `payment.captured` and `order.paid`, and a secret of your choice. Put the same secret in `.env` as `RAZORPAY_WEBHOOK_SECRET`. (The webhook needs the app on a public https address.)
+4. Make sure **automatic capture** is on in Razorpay (Account & Settings → Payment capture), otherwise payments stay "authorized".
+5. Restart the app. **Menu & settings → Ways to pay** says whether Razorpay is connected and whether it's in test mode. Tick **Online (Razorpay)**.
+6. Pay a test bill with Razorpay's test UPI ID `success@razorpay` or a [test card](https://razorpay.com/docs/payments/payments/test-card-details/). When it works, switch to Live keys.
+
+The secret key stays on the server. The phone only ever sees the public key ID and the order ID, and every payment is checked against Razorpay's signature before it counts.
+
+### Other ways to pay
 
 - **UPI** works with no payment gateway: enter the restaurant's UPI ID in settings, and guests get a button that opens their UPI app (GPay, PhonePe, Paytm) and a QR code, both filled in with the exact amount and table. The money goes straight to that UPI ID.
 - Every payment shows on the floor screen for staff to confirm once it arrives. Sales on the owner dashboard count confirmed payments only.
-- A gateway such as Razorpay can later confirm UPI and card payments automatically (see Not built yet).
 
 ## Connect the cameras
 
@@ -110,7 +128,7 @@ npm test
 
 ## Not built yet
 
-- Automatic payment confirmation through a gateway (for example Razorpay). Today staff confirm each payment by hand.
+- Refunds from the app (do them in the Razorpay dashboard for now).
 - The Docker files haven't been run yet (no Docker in the build environment). The app itself is tested.
 - Multiple restaurants or branches, user accounts per waiter, and a real database (the JSON file is fine for one branch).
 - The camera connector has not been run against a live CCTV feed yet. Expect to tune the zones and the confidence threshold on site.
