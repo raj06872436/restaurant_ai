@@ -1,12 +1,12 @@
 // Shared helpers for every staff page (and esc/money/api/toast for the guest app).
 window.TS = (() => {
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  let currency = 'Rs';
+  let currency = 'Rs', apiLang = null;
   const money = n => `${currency} ${Number(n || 0).toLocaleString('en-IN')}`;
   async function api(url, opts = {}) {
     const res = await fetch(url, {
       method: opts.method || (opts.body ? 'POST' : 'GET'),
-      headers: { 'content-type': 'application/json', ...(opts.headers || {}) },
+      headers: { 'content-type': 'application/json', 'x-lang': apiLang || lang, ...(opts.headers || {}) },
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
@@ -64,6 +64,9 @@ window.TS = (() => {
       typeTable: 'Type a name for the new table.', exists: t => `${t} already exists.`, optional: 'optional',
       staff: 'Staff', role: 'Role', roles: { owner: 'Owner (everything)', waiter: 'Waiter (floor + kitchen)', kitchen: 'Kitchen only' },
       newPin: 'New PIN', pinKeep: 'leave empty to keep', active: 'Active', addPerson: 'Add person', saveTeam: 'Save staff', teamSaved: 'Staff saved.',
+      report: 'Daily report', pickDay: 'Day', csv: 'Download CSV (Excel)', rSales: 'Sales (confirmed)', rTips: 'Tips', rUnconf: 'Waiting for confirmation', rOrdered: 'Food ordered',
+      rOrders: 'Orders', rTables: 'Tables served', rGuests: 'Guests', rWalk: 'Left without paying', byMethod: 'Payments by method', count: 'Count', amount: 'Amount',
+      dish: 'Dish', qty: 'Qty', revenue: 'Revenue', hour: 'Hour', noData: 'Nothing recorded on this day.',
       teamHelp: 'Each person logs in with their own 4 to 8 digit PIN, so the dashboard shows who handled what. Untick Active to stop someone logging in.',
     },
     hi: {
@@ -108,6 +111,9 @@ window.TS = (() => {
       typeTable: 'नई टेबल का नाम लिखें।', exists: t => `${t} पहले से है।`, optional: 'वैकल्पिक',
       staff: 'स्टाफ़', role: 'काम', roles: { owner: 'मालिक (सब कुछ)', waiter: 'वेटर (फ़्लोर + किचन)', kitchen: 'सिर्फ़ किचन' },
       newPin: 'नया PIN', pinKeep: 'पुराना रखने के लिए खाली छोड़ें', active: 'चालू', addPerson: 'व्यक्ति जोड़ें', saveTeam: 'स्टाफ़ सेव करें', teamSaved: 'स्टाफ़ सेव हो गया।',
+      report: 'दिन की रिपोर्ट', pickDay: 'दिन', csv: 'CSV डाउनलोड करें (Excel)', rSales: 'बिक्री (पुष्टि हुई)', rTips: 'टिप', rUnconf: 'पुष्टि बाकी', rOrdered: 'ऑर्डर हुआ खाना',
+      rOrders: 'ऑर्डर', rTables: 'टेबल परोसीं', rGuests: 'मेहमान', rWalk: 'बिना भुगतान गए', byMethod: 'तरीके से भुगतान', count: 'संख्या', amount: 'रकम',
+      dish: 'डिश', qty: 'मात्रा', revenue: 'कमाई', hour: 'घंटा', noData: 'इस दिन कुछ दर्ज नहीं हुआ।',
       teamHelp: 'हर व्यक्ति अपने 4 से 8 अंकों के PIN से लॉग इन करता है, ताकि डैशबोर्ड पर दिखे किसने क्या संभाला। किसी को रोकने के लिए "चालू" हटा दें।',
     },
   };
@@ -162,5 +168,5 @@ window.TS = (() => {
     setInterval(onUpdate, 30000); // timers on screen + safety net
     return socket;
   }
-  return { esc, money, api, toast, ago, time, staffGate, nav, live, alertText, t: () => w(), lang: () => lang, setCurrency: c => (currency = c || currency) };
+  return { esc, money, api, toast, ago, time, staffGate, nav, live, alertText, t: () => w(), lang: () => lang, setCurrency: c => (currency = c || currency), setApiLang: l => (apiLang = l) };
 })();

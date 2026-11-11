@@ -9,6 +9,8 @@
 .dish{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 .dish small{display:block;color:var(--muted);font-size:.8rem}
 .dish .dn{flex:1;min-width:0}
+.dish{flex-wrap:wrap}
+.dish .note{flex-basis:100%;padding:7px 10px;font-size:.85rem}
 .dish .pic{width:64px;height:64px;border-radius:10px;object-fit:cover;flex:none}
 .qty{font-family:var(--f-mono);min-width:1.6em;text-align:center}
 .bar{position:fixed;left:0;right:0;bottom:0;padding:12px max(16px,env(safe-area-inset-left)) calc(12px + env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line)}
@@ -31,13 +33,13 @@ const { esc, money, api, toast } = TS;
 const tableId = location.pathname.split('/').pop();
 const key = new URLSearchParams(location.search).get('k') || '';
 const H = { 'x-table-key': key };
-let view = null, cart = {}, tab = 'menu', cat = null, split = 1, tip = 10, method = null, busy = false, upi = null;
+let view = null, cart = {}, notes = {}, tab = 'menu', cat = null, split = 1, tip = 10, method = null, busy = false, upi = null;
 
 /* ---------- English / Hindi ---------- */
 const WORDS = {
   en: {
     table: 'Table', call: 'Call waiter', coming: 'Waiter is coming ✓', menu: 'Menu', myOrder: 'My order', bill: 'Bill & pay',
-    veg: 'Vegetarian', removeOne: 'Remove one', addOne: 'Add one', send: n => `Send ${n} item${n > 1 ? 's' : ''} to kitchen`,
+    veg: 'Vegetarian', note: 'Note for the kitchen, e.g. less spicy', removeOne: 'Remove one', addOne: 'Add one', send: n => `Send ${n} item${n > 1 ? 's' : ''} to kitchen`,
     noOrder: "You haven't ordered yet. Pick dishes from the menu.", order: 'Order',
     st: { new: 'The kitchen has your order', cooking: 'Your food is cooking', ready: 'Your food is on its way', served: 'Enjoy your meal' },
     stShort: { new: 'received', cooking: 'cooking', ready: 'on its way', served: 'served', cancelled: 'cancelled' },
@@ -53,7 +55,7 @@ const WORDS = {
   },
   hi: {
     table: 'टेबल', call: 'वेटर बुलाएं', coming: 'वेटर आ रहे हैं ✓', menu: 'मेन्यू', myOrder: 'मेरा ऑर्डर', bill: 'बिल और भुगतान',
-    veg: 'शाकाहारी', removeOne: 'एक हटाएं', addOne: 'एक जोड़ें', send: n => `${n} आइटम किचन भेजें`,
+    veg: 'शाकाहारी', note: 'किचन के लिए नोट, जैसे कम तीखा', removeOne: 'एक हटाएं', addOne: 'एक जोड़ें', send: n => `${n} आइटम किचन भेजें`,
     noOrder: 'आपने अभी ऑर्डर नहीं किया है। मेन्यू से डिश चुनें।', order: 'ऑर्डर',
     st: { new: 'किचन को आपका ऑर्डर मिल गया', cooking: 'आपका खाना बन रहा है', ready: 'आपका खाना आ रहा है', served: 'खाने का आनंद लें' },
     stShort: { new: 'मिला', cooking: 'बन रहा है', ready: 'आ रहा है', served: 'परोसा गया', cancelled: 'रद्द' },
@@ -71,6 +73,7 @@ const WORDS = {
 let lang = 'en';
 try { lang = localStorage.getItem('ts_lang') || ((navigator.language || '').startsWith('hi') ? 'hi' : 'en'); } catch {}
 const W = () => WORDS[lang] || WORDS.en;
+TS.setApiLang(lang);
 const dishName = m => (lang === 'hi' && m.nameHi) || m.name;
 const lineName = l => { const m = view.menu.find(x => x.id === l.id); return m ? dishName(m) : l.name; };
 
@@ -78,6 +81,8 @@ async function load() {
   try {
     view = await api(`/api/guest/${tableId}`, { headers: H }); TS.setCurrency(view.currency);
     if (!view.payMethods.some(m => m.id === method)) method = view.payMethods[0] && view.payMethods[0].id;
+    // Don't redraw under someone typing a note; redraw when they leave the box.
+    if (document.activeElement && document.activeElement.matches('input.note')) { document.activeElement.addEventListener('blur', render, { once: true }); return; }
     render();
   }
   catch (e) { document.getElementById('app').innerHTML = `<h3>${W().cantOpen}</h3><p class="muted">${esc(e.message)}</p>`; }
@@ -112,7 +117,8 @@ function render() {
     h += view.menu.filter(m => m.cat === cat).map(m => `<div class="dish">${m.photo ? `<img class="pic" src="${esc(m.photo)}" alt="" loading="lazy">` : ''}
       <div class="dn">${m.veg ? `<span class="veg" title="${w.veg}" aria-label="${w.veg}"></span>` : ''}${esc(dishName(m))}<small>${esc(m.desc)}${m.desc ? ' · ' : ''}${money(m.price)}</small></div>
       <div class="row"><button class="mini" data-dec="${esc(m.id)}" aria-label="${w.removeOne}: ${esc(dishName(m))}">−</button><span class="qty">${cart[m.id] || 0}</span>
-      <button class="mini" data-inc="${esc(m.id)}" aria-label="${w.addOne}: ${esc(dishName(m))}">+</button></div></div>`).join('');
+      <button class="mini" data-inc="${esc(m.id)}" aria-label="${w.addOne}: ${esc(dishName(m))}">+</button></div>
+      ${cart[m.id] ? `<input class="note" type="text" maxlength="140" data-note="${esc(m.id)}" value="${esc(notes[m.id] || '')}" placeholder="${w.note}" aria-label="${w.note}">` : ''}</div>`).join('');
     const n = cartLines().reduce((a, l) => a + l.qty, 0);
     bar.hidden = !n;
     barIn.innerHTML = `<button class="primary" data-act="send" ${busy ? 'disabled' : ''}>${w.send(n)} · ${money(cartTotal())}</button>`;
@@ -122,7 +128,7 @@ function render() {
     else {
       h += `<h3>${s.words}</h3><div class="steps">${[1, 2, 3, 4].map(i => `<span class="${i <= s.step ? 'on' : ''}"></span>`).join('')}</div>`;
       h += view.orders.map(o => `<div class="box"><div class="row"><span class="tag">${w.order} ${esc(o.id)} · ${esc(w.stShort[o.status] || o.status)}</span><b>${money(o.total)}</b></div>
-        ${o.lines.map(l => `<div class="row"><span>${esc(lineName(l))} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></div>`).join('')}</div>`).join('');
+        ${o.lines.map(l => `<div class="row"><span>${esc(lineName(l))} × ${l.qty}${l.note ? `<br><small class="muted">${esc(l.note)}</small>` : ''}</span><span class="num">${money(l.price * l.qty)}</span></div>`).join('')}</div>`).join('');
     }
     h += `<div class="box"><span class="tag">${w.wifi}</span><div class="row"><span>${esc(view.wifi.network)}</span><span style="font-family:var(--f-mono)">${esc(view.wifi.password)}</span></div>
       <button class="mini" data-act="copywifi">${w.copy}</button></div>`;
@@ -151,6 +157,7 @@ function render() {
   app.innerHTML = h;
 }
 
+document.addEventListener('input', e => { if (e.target.dataset.note) notes[e.target.dataset.note] = e.target.value; });
 document.addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b || busy) return;
   const d = b.dataset, w = W();
@@ -162,14 +169,14 @@ document.addEventListener('click', async e => {
   if (d.tip) tip = +d.tip;
   if (d.method) method = d.method;
   try {
-    if (d.act === 'lang') { lang = lang === 'hi' ? 'en' : 'hi'; try { localStorage.setItem('ts_lang', lang); } catch {} render(); return; }
+    if (d.act === 'lang') { lang = lang === 'hi' ? 'en' : 'hi'; TS.setApiLang(lang); try { localStorage.setItem('ts_lang', lang); } catch {} render(); return; }
     if (d.act === 'upidone') { upi = null; render(); return; }
     if (d.act === 'call') { await api(`/api/guest/${tableId}/call`, { headers: H, body: { reason: 'help' } }); toast(w.waiterOnWay); await load(); return; }
     if (d.act === 'copywifi') { try { await navigator.clipboard.writeText(view.wifi.password); toast(w.copied); } catch { toast(view.wifi.password); } return; }
     if (d.act === 'send') {
       busy = true; render();
-      await api(`/api/guest/${tableId}/order`, { headers: H, body: { items: cartLines().map(l => ({ id: l.id, qty: l.qty })) } });
-      cart = {}; tab = 'order'; toast(w.sent);
+      await api(`/api/guest/${tableId}/order`, { headers: H, body: { items: cartLines().map(l => ({ id: l.id, qty: l.qty, note: notes[l.id] || '' })) } });
+      cart = {}; notes = {}; tab = 'order'; toast(w.sent);
     }
     if (d.act === 'pay') {
       busy = true; render();

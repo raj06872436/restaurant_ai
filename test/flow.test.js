@@ -137,3 +137,25 @@ test('HTTP: table key, staff PIN and camera key are enforced', async () => {
     server.close(); restaurant.removeAllListeners();
   }
 });
+
+test('daily report splits payments by method and lists dish notes in orders', () => {
+  const { r, clock } = setup();
+  r.d.staff = [{ id: 'S1', name: 'Ravi', role: 'waiter', active: true }];
+  r.cameraReport([{ tableId: 'T1', people: 2 }]);
+  const o = r.placeOrder('T1', [{ id: 'karahi', qty: 1, note: 'less spicy' }, { id: 'naan', qty: 2 }]);
+  assert.equal(o.lines[0].note, 'less spicy');
+  const a = r.pay('T1', { amount: 1000, tip: 50, method: 'cash' }).payment;
+  const b = r.pay('T1', { amount: 1050, method: 'card' }).payment;
+  r.confirmPayment('T1', a.id, 'Ravi');
+  const rep = r.report();
+  assert.equal(rep.sales, 1000);
+  assert.equal(rep.unconfirmed, 1050);
+  assert.deepEqual(rep.byMethod.map(m => [m.method, m.amount, m.tips]), [['cash', 1000, 50]]);
+  assert.deepEqual(rep.dishes.map(d => [d.name, d.qty]), [['Chicken Karahi', 1], ['Garlic Naan', 2]]);
+  r.confirmPayment('T1', b.id, 'Ravi');
+  const csv = r.reportCsv();
+  assert.match(csv, /card,1,1050,0/);
+  assert.match(csv, /Ravi,1,,2,0/);
+  clock.add(24 * 60);
+  assert.equal(r.report().sales, 0, 'next day starts empty');
+});

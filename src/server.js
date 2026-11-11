@@ -9,6 +9,7 @@ const { Server } = require('socket.io');
 const { Store } = require('./store');
 const { Restaurant, httpError } = require('./restaurant');
 const { Team } = require('./team');
+const { translate } = require('./i18n');
 
 function createApp({
   dataFile = path.join(__dirname, '..', 'data', 'db.json'),
@@ -24,10 +25,25 @@ function createApp({
   const server = http.createServer(app);
   const io = new Server(server);
   const team = new Team(r, staffPin);
-  const sessions = new Map(); // session id -> staff id
+  // Logins survive restarts: only a hash of each session id is saved, so the data file can't be used to log in.
+  const SESSION_DAYS = 14;
+  const sidHash = sid => crypto.createHash('sha256').update(String(sid)).digest('hex');
+  r.d.sessions = r.d.sessions || {};
+  const sessions = {
+    get: sid => { const x = sid && r.d.sessions[sidHash(sid)]; return x && x.exp > Date.now() ? x.staffId : undefined; },
+    set: (sid, staffId) => { r.d.sessions[sidHash(sid)] = { staffId, exp: Date.now() + SESSION_DAYS * 864e5 }; store.save(); },
+    delete: sid => { delete r.d.sessions[sidHash(sid)]; store.save(); },
+    dropMissing: () => { for (const [h, x] of Object.entries(r.d.sessions)) if (!team.byId(x.staffId) || x.exp < Date.now()) delete r.d.sessions[h]; store.save(); },
+  };
+  sessions.dropMissing();
 
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
+  app.use((req, res, next) => { // error messages in the screen's language
+    const json = res.json.bind(res);
+    res.json = body => json(body && body.error ? { ...body, error: translate(body.error, req.get('x-lang')) } : body);
+    next();
+  });
 
   const memberOf = sid => team.byId(sessions.get(sid));
   const need = area => (req, res, next) => {
@@ -61,7 +77,7 @@ function createApp({
     tries.delete(req.ip);
     const sid = crypto.randomBytes(18).toString('hex');
     sessions.set(sid, m.id);
-    res.cookie('ts_staff', sid, { httpOnly: true, sameSite: 'lax', maxAge: 14 * 24 * 3600e3 });
+    res.cookie('ts_staff', sid, { httpOnly: true, sameSite: 'lax', maxAge: SESSION_DAYS * 864e5 });
     res.json({ ok: true, name: m.name, role: m.role });
   });
   app.post('/api/logout', (req, res) => { sessions.delete(req.cookies.ts_staff); res.clearCookie('ts_staff'); res.json({ ok: true }); });
@@ -106,6 +122,14 @@ function createApp({
   app.post('/api/tables/:table/payments/:pid/confirm', need('floor'), wrap(req => r.confirmPayment(req.params.table, req.params.pid, by(req))));
   app.post('/api/orders/:id/advance', need('kitchen'), wrap(req => r.advanceOrder(req.params.id, req.body.status, by(req))));
   app.get('/api/stats', need('owner'), wrap(() => r.stats()));
+  app.get('/api/report', need('owner'), wrap(req => r.report(req.query.date)));
+  app.get('/api/report.csv', need('owner'), (req, res) => {
+    try {
+      const csv = r.reportCsv(req.query.date);
+      res.set('content-disposition', `attachment; filename="tablesense-${r.report(req.query.date).date}.csv"`);
+      res.type('text/csv').send('\ufeff' + csv); // BOM so Excel reads ₹ and Hindi correctly
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
   app.put('/api/menu', need('settings'), wrap(req => r.setMenu(req.body.menu)));
   const PHOTO_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
   app.post('/api/menu/photo', need('settings'), express.raw({ type: Object.keys(PHOTO_TYPES), limit: '3mb' }), wrap(req => {
@@ -120,7 +144,7 @@ function createApp({
   app.get('/api/team', need('settings'), wrap(() => team.publicList()));
   app.put('/api/team', need('settings'), wrap(req => {
     const list = team.save(req.body.staff);
-    for (const [sid, id] of sessions) if (!team.byId(id)) sessions.delete(sid); // removed or paused people are logged out
+    sessions.dropMissing(); // removed or paused people are logged out
     return list;
   }));
   app.get('/api/qr/:table.svg', need('settings'), async (req, res) => {

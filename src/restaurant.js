@@ -314,17 +314,65 @@ class Restaurant extends EventEmitter {
     };
   }
 
-  teamStats(dayStart) {
+  // End-of-day numbers for one calendar day (server's local time).
+  report(day) {
+    const start = day ? new Date(day + 'T00:00:00').getTime() : startOfDay(this.now());
+    if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(start)) throw httpError(400, 'Pick a valid date.');
+    const end = start + 24 * 60 * MIN;
+    const inDay = ts => ts >= start && ts < end;
+    const payments = this.d.visits.flatMap(v => v.payments.map(p => ({ ...p, tableId: v.tableId }))).filter(p => inDay(p.at));
+    const confirmed = payments.filter(p => p.confirmed);
+    const byMethod = {};
+    for (const p of confirmed) {
+      const m = (byMethod[p.method] = byMethod[p.method] || { method: p.method, count: 0, amount: 0, tips: 0 });
+      m.count++; m.amount += p.amount; m.tips += p.tip || 0;
+    }
+    const orders = this.d.orders.filter(o => inDay(o.at) && o.status !== 'cancelled');
+    const dishes = {};
+    for (const o of orders) for (const l of o.lines) {
+      const d = (dishes[l.id] = dishes[l.id] || { name: l.name, qty: 0, revenue: 0 });
+      d.qty += l.qty; d.revenue += l.qty * l.price;
+    }
+    const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, guests: 0, orders: 0, ordered: 0 }));
+    for (const v of this.d.visits) if (inDay(v.seatedAt)) hours[new Date(v.seatedAt).getHours()].guests += v.guests;
+    for (const o of orders) { const h = hours[new Date(o.at).getHours()]; h.orders++; h.ordered += o.total; }
+    const visits = this.d.visits.filter(v => inDay(v.seatedAt));
+    return {
+      date: localDate(start),
+      sales: confirmed.reduce((a, p) => a + p.amount, 0), tips: confirmed.reduce((a, p) => a + (p.tip || 0), 0),
+      unconfirmed: payments.filter(p => !p.confirmed).reduce((a, p) => a + p.amount + (p.tip || 0), 0),
+      ordered: orders.reduce((a, o) => a + o.total, 0), orders: orders.length, visits: visits.length, guests: visits.reduce((a, v) => a + v.guests, 0),
+      walkouts: this.d.alerts.filter(a => inDay(a.at) && a.kind === 'unpaid').map(a => ({ tableId: a.tableId, amount: (a.params || {}).amount || 0 })),
+      byMethod: Object.values(byMethod).sort((a, b) => b.amount - a.amount),
+      dishes: Object.values(dishes).sort((a, b) => b.revenue - a.revenue),
+      hours: hours.filter(h => h.guests || h.orders),
+      team: this.teamStats(start, end),
+    };
+  }
+  reportCsv(day) {
+    const r = this.report(day), cur = this.d.settings.currency;
+    const q = v => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+    const rows = [[`${this.d.settings.name} daily report`, r.date], [],
+      ['Summary'], ['Sales (confirmed)', r.sales], ['Tips', r.tips], ['Waiting for confirmation', r.unconfirmed], ['Food ordered', r.ordered],
+      ['Orders', r.orders], ['Tables served', r.visits], ['Guests', r.guests], ['Left without paying', r.walkouts.length], [],
+      ['Payments by method', 'Count', `Amount (${cur})`, `Tips (${cur})`], ...r.byMethod.map(m => [m.method, m.count, m.amount, m.tips]), [],
+      ['Dish', 'Quantity', `Revenue (${cur})`], ...r.dishes.map(d => [d.name, d.qty, d.revenue]), [],
+      ['Hour', 'Guests', 'Orders', `Ordered (${cur})`], ...r.hours.map(h => [`${String(h.hour).padStart(2, '0')}:00`, h.guests, h.orders, h.ordered]), [],
+      ['Staff', 'Alerts handled', 'Avg. minutes to respond', 'Payments confirmed', 'Orders served'], ...r.team.map(t => [t.name, t.alerts, t.avgResponseMin ?? '', t.payments, t.served])];
+    return rows.map(row => row.map(q).join(',')).join('\r\n') + '\r\n';
+  }
+
+  teamStats(dayStart, dayEnd = Infinity) {
     const people = {};
     const get = name => (people[name] = people[name] || { name, alerts: 0, responseMins: [], payments: 0, served: 0 });
     const staffNames = new Set((this.d.staff || []).map(s => s.name));
     for (const a of this.d.alerts) {
-      if (a.at < dayStart || !a.doneAt || !staffNames.has(a.doneBy)) continue;
+      if (a.at < dayStart || a.at >= dayEnd || !a.doneAt || !staffNames.has(a.doneBy)) continue;
       const p = get(a.doneBy); p.alerts++;
       if (['waiting', 'call', 'bill'].includes(a.kind)) p.responseMins.push((a.doneAt - a.at) / MIN);
     }
-    for (const v of this.d.visits) for (const pay of v.payments) if (pay.at >= dayStart && staffNames.has(pay.confirmedBy)) get(pay.confirmedBy).payments++;
-    for (const o of this.d.orders) if (o.at >= dayStart && o.status === 'served' && staffNames.has(o.servedBy)) get(o.servedBy).served++;
+    for (const v of this.d.visits) for (const pay of v.payments) if (pay.at >= dayStart && pay.at < dayEnd && staffNames.has(pay.confirmedBy)) get(pay.confirmedBy).payments++;
+    for (const o of this.d.orders) if (o.at >= dayStart && o.at < dayEnd && o.status === 'served' && staffNames.has(o.servedBy)) get(o.servedBy).served++;
     return Object.values(people).map(p => ({ name: p.name, alerts: p.alerts, avgResponseMin: avg(p.responseMins), payments: p.payments, served: p.served })).sort((a, b) => b.alerts - a.alerts);
   }
 
@@ -355,6 +403,7 @@ class Restaurant extends EventEmitter {
 }
 
 function avg(a) { return a.length ? Math.round((a.reduce((x, y) => x + y, 0) / a.length) * 10) / 10 : null; }
+function localDate(ts) { const d = new Date(ts), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 function startOfDay(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); }
 function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
 
