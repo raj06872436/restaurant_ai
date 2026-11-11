@@ -25,10 +25,10 @@ class Restaurant extends EventEmitter {
   setState(t, state) { if (t.state !== state) { t.state = state; t.since = this.now(); } }
 
   /* ---------- alerts ---------- */
-  raise(tableId, kind, text, source) {
+  raise(tableId, kind, text, source, params = {}) {
     const open = this.d.alerts.find(a => !a.doneAt && a.tableId === tableId && a.kind === kind);
     if (open) return open;
-    const a = { id: this.store.id('A'), tableId, kind, text, source, at: this.now(), doneAt: null, doneBy: null };
+    const a = { id: this.store.id('A'), tableId, kind, text, source, params, at: this.now(), doneAt: null, doneBy: null };
     this.d.alerts.push(a);
     this.emit('alert', a);
     return a;
@@ -66,11 +66,11 @@ class Restaurant extends EventEmitter {
     }
     this.changed();
   }
-  waiterVisited(t) {
+  waiterVisited(t, by = 'camera') {
     t.waiterSeenAt = this.now();
     const v = this.visit(t.visitId);
     if (v && !v.waiterAt) v.waiterAt = this.now();
-    this.resolve(t.id, ['waiting', 'call'], 'camera');
+    this.resolve(t.id, ['waiting', 'call'], by);
   }
   seat(t, people, source) {
     if (t.visitId) return this.visit(t.visitId);
@@ -88,7 +88,7 @@ class Restaurant extends EventEmitter {
     this.resolve(t.id, ['waiting', 'call', 'ready', 'bill']);
     const unpaid = v && this.billFor(v).due > 0;
     this.setState(t, 'dirty');
-    if (unpaid) this.raise(t.id, 'unpaid', `Guests left ${t.id} with ${this.money(this.billFor(v).due)} unpaid. Check with the cashier.`, 'camera');
+    if (unpaid) this.raise(t.id, 'unpaid', `Guests left ${t.id} with ${this.money(this.billFor(v).due)} unpaid. Check with the cashier.`, 'camera', { amount: this.billFor(v).due });
     this.raise(t.id, 'clean', `Guests left ${t.id}. Clean and reset the table.`, 'camera');
   }
   markClean(tableId, by = 'staff', save = true) {
@@ -132,7 +132,7 @@ class Restaurant extends EventEmitter {
   callWaiter(tableId, reason = 'help') {
     const t = this.table(tableId);
     const words = { water: 'wants water', bill: 'asked for the bill', help: 'needs help' }[reason] || 'needs help';
-    const a = this.raise(t.id, reason === 'bill' ? 'bill' : 'call', `Guests at ${t.id} ${words}.`, 'guest app');
+    const a = this.raise(t.id, reason === 'bill' ? 'bill' : 'call', `Guests at ${t.id} ${words}.`, 'guest app', { reason });
     this.changed();
     return a;
   }
@@ -165,16 +165,16 @@ class Restaurant extends EventEmitter {
     v.payments.push(p);
     const left = bill.due - amount;
     if (left === 0) v.paidAt = this.now();
-    this.raise(t.id, 'payment', `${t.id} is paying ${this.money(amount + tip)} by ${METHOD_LABEL[method] || method}. Confirm the payment.`, 'guest app');
+    this.raise(t.id, 'payment', `${t.id} is paying ${this.money(amount + tip)} by ${METHOD_LABEL[method] || method}. Confirm the payment.`, 'guest app', { amount: amount + tip, method });
     this.changed();
     return { payment: p, due: left };
   }
-  confirmPayment(tableId, paymentId) {
+  confirmPayment(tableId, paymentId, by = 'staff') {
     const v = this.currentVisit(tableId) || this.d.visits.find(x => x.payments.some(p => p.id === paymentId));
     const p = v && v.payments.find(x => x.id === paymentId);
     if (!p) throw httpError(404, 'Payment not found');
-    p.confirmed = true;
-    if (v.payments.every(x => x.confirmed)) this.resolve(v.tableId, ['payment'], 'staff');
+    p.confirmed = true; p.confirmedBy = by;
+    if (v.payments.every(x => x.confirmed)) this.resolve(v.tableId, ['payment'], by);
     this.changed();
     return p;
   }
@@ -246,7 +246,7 @@ class Restaurant extends EventEmitter {
   }
 
   /* ---------- kitchen ---------- */
-  advanceOrder(orderId, status) {
+  advanceOrder(orderId, status, by = 'staff') {
     const o = this.d.orders.find(x => x.id === orderId);
     if (!o) throw httpError(404, 'Order not found');
     const flow = ['new', 'cooking', 'ready', 'served'];
@@ -255,7 +255,7 @@ class Restaurant extends EventEmitter {
     o.status = next;
     if (next === 'ready') { o.readyAt = this.now(); }
     if (next === 'served' || next === 'cancelled') {
-      o.servedAt = this.now();
+      o.servedAt = this.now(); o.servedBy = by;
       const t = this.table(o.tableId);
       const pending = this.d.orders.some(x => x.visitId === o.visitId && ['new', 'cooking', 'ready'].includes(x.status));
       if (!pending) { this.resolve(t.id, ['ready']); if (t.state === 'ordered') this.setState(t, 'eating'); }
@@ -274,14 +274,14 @@ class Restaurant extends EventEmitter {
       const waited = (now - v.seatedAt) / MIN;
       if (!v.firstOrderAt && !v.waiterAt && waited >= s.noOrderAlertMin) {
         const before = this.d.alerts.length;
-        this.raise(t.id, 'waiting', `${v.guests} guest${v.guests > 1 ? 's' : ''} at ${t.id} for ${Math.floor(waited)} min with no order and no waiter. Go to the table.`, 'camera');
+        this.raise(t.id, 'waiting', `${v.guests} guest${v.guests > 1 ? 's' : ''} at ${t.id} for ${Math.floor(waited)} min with no order and no waiter. Go to the table.`, 'camera', { guests: v.guests, min: Math.floor(waited) });
         dirty = dirty || this.d.alerts.length !== before;
       }
     }
     for (const o of this.d.orders) {
       if (o.status === 'ready' && (now - o.readyAt) / MIN >= s.readyNotServedAlertMin) {
         const before = this.d.alerts.length;
-        this.raise(o.tableId, 'ready', `Food for ${o.tableId} has been ready for ${Math.floor((now - o.readyAt) / MIN)} min. Take it to the table.`, 'kitchen');
+        this.raise(o.tableId, 'ready', `Food for ${o.tableId} has been ready for ${Math.floor((now - o.readyAt) / MIN)} min. Take it to the table.`, 'kitchen', { min: Math.floor((now - o.readyAt) / MIN) });
         dirty = dirty || this.d.alerts.length !== before;
       }
     }
@@ -310,7 +310,22 @@ class Restaurant extends EventEmitter {
       noOrderAlerts: waitAlerts, byHour,
       topItems: Object.entries(items).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, qty]) => ({ name, qty })),
       walkouts: this.d.alerts.filter(a => a.at >= dayStart && a.kind === 'unpaid').length,
+      team: this.teamStats(dayStart),
     };
+  }
+
+  teamStats(dayStart) {
+    const people = {};
+    const get = name => (people[name] = people[name] || { name, alerts: 0, responseMins: [], payments: 0, served: 0 });
+    const staffNames = new Set((this.d.staff || []).map(s => s.name));
+    for (const a of this.d.alerts) {
+      if (a.at < dayStart || !a.doneAt || !staffNames.has(a.doneBy)) continue;
+      const p = get(a.doneBy); p.alerts++;
+      if (['waiting', 'call', 'bill'].includes(a.kind)) p.responseMins.push((a.doneAt - a.at) / MIN);
+    }
+    for (const v of this.d.visits) for (const pay of v.payments) if (pay.at >= dayStart && staffNames.has(pay.confirmedBy)) get(pay.confirmedBy).payments++;
+    for (const o of this.d.orders) if (o.at >= dayStart && o.status === 'served' && staffNames.has(o.servedBy)) get(o.servedBy).served++;
+    return Object.values(people).map(p => ({ name: p.name, alerts: p.alerts, avgResponseMin: avg(p.responseMins), payments: p.payments, served: p.served })).sort((a, b) => b.alerts - a.alerts);
   }
 
   money(n) { return `${this.d.settings.currency} ${Number(n).toLocaleString('en-IN')}`; }

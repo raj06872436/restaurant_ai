@@ -31,6 +31,8 @@ input{border:1px solid var(--line);background:var(--panel);border-radius:8px;pad
 .ph{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:12px}
 .tag{font-family:var(--f-mono);font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .muted{color:var(--muted)}
+:lang(hi) .tbl,:lang(hi) .legend,:lang(hi) .src,:lang(hi) .tbl button{font-family:var(--f-body)}
+:lang(hi) .tag{letter-spacing:0;text-transform:none;font-family:var(--f-body);font-size:.78rem}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{padding:5px 11px;border-radius:999px;font-size:.85rem}

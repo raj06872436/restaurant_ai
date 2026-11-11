@@ -48,7 +48,17 @@ Then open:
 
 Guests can switch the menu between English and Hindi. Dishes show their Hindi name when one is set.
 
-Staff pages ask for the PIN (default `1234`). Each QR code carries a secret key for its own table, so a guest can only order for the table they're sitting at.
+Staff log in with their own PIN. On first start there is one owner account with PIN `1234` (or `STAFF_PIN` if set). The owner adds people under **Menu & settings → Staff** and gives each a role:
+
+| Role | Can use |
+| --- | --- |
+| Owner | everything: floor, kitchen, owner dashboard, QR codes, menu and settings |
+| Waiter | floor & alerts, kitchen |
+| Kitchen | kitchen screen only |
+
+The owner dashboard shows, per person, how many alerts they handled, how fast they responded, payments confirmed and orders served. Untick **Active** to stop someone logging in; they're logged out at once. After 5 wrong PINs a device has to wait a minute.
+
+All staff screens and the guest app can switch between English and Hindi (button in the top bar). Messages coming back from the server, such as form errors, are still in English. Each QR code carries a secret key for its own table, so a guest can only order for the table they're sitting at.
 
 Set `PUBLIC_URL` to the address guests' phones will reach (for example `http://192.168.1.10:3000` on the restaurant Wi-Fi, or your domain) before printing QR codes.
 
@@ -95,7 +105,7 @@ npm test
 ## Not built yet
 
 - Automatic payment confirmation through a gateway (for example Razorpay). Today staff confirm each payment by hand.
-- Translating staff screens (only the guest app has Hindi so far).
+- Staff logins reset when the server restarts (people log in again). Error messages from the server are English only.
 - The Docker files haven't been run yet (no Docker in the build environment). The app itself is tested.
 - Multiple restaurants or branches, user accounts per waiter, and a real database (the JSON file is fine for one branch).
 - The camera connector has not been run against a live CCTV feed yet. Expect to tune the zones and the confidence threshold on site.

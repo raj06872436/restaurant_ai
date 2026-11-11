@@ -8,6 +8,7 @@ const QRCode = require('qrcode');
 const { Server } = require('socket.io');
 const { Store } = require('./store');
 const { Restaurant, httpError } = require('./restaurant');
+const { Team } = require('./team');
 
 function createApp({
   dataFile = path.join(__dirname, '..', 'data', 'db.json'),
@@ -22,13 +23,20 @@ function createApp({
   const app = express();
   const server = http.createServer(app);
   const io = new Server(server);
-  const sessions = new Set();
+  const team = new Team(r, staffPin);
+  const sessions = new Map(); // session id -> staff id
 
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
 
-  const isStaff = req => sessions.has(req.cookies.ts_staff);
-  const staffOnly = (req, res, next) => (isStaff(req) ? next() : res.status(401).json({ error: 'Log in with the staff PIN.' }));
+  const memberOf = sid => team.byId(sessions.get(sid));
+  const need = area => (req, res, next) => {
+    const m = memberOf(req.cookies.ts_staff);
+    if (!m) return res.status(401).json({ error: 'Log in with your staff PIN.' });
+    if (!team.can(m, area)) return res.status(403).json({ error: "Your account can't use this screen. Ask the owner." });
+    req.member = m; next();
+  };
+  const by = req => req.member.name;
   const guestTable = req => {
     const t = r.table(req.params.table);
     if (req.get('x-table-key') !== t.key && req.query.k !== t.key) throw httpError(403, 'This link is not valid. Scan the QR code on your table again.');
@@ -40,16 +48,27 @@ function createApp({
   };
 
   /* ---------- staff login ---------- */
+  const tries = new Map(); // ip -> { n, until }, slows down PIN guessing
   app.post('/api/login', (req, res) => {
-    const pin = String(req.body.pin || '');
-    const ok = pin.length === staffPin.length && crypto.timingSafeEqual(Buffer.from(pin), Buffer.from(staffPin));
-    if (!ok) return res.status(401).json({ error: 'Wrong PIN. Try again.' });
+    const t = tries.get(req.ip) || { n: 0, until: 0 };
+    if (Date.now() < t.until) return res.status(429).json({ error: 'Too many wrong PINs. Wait a minute and try again.' });
+    const m = team.login(req.body.pin);
+    if (!m) {
+      t.n++; if (t.n >= 5) { t.until = Date.now() + 60e3; t.n = 0; }
+      tries.set(req.ip, t);
+      return res.status(401).json({ error: 'Wrong PIN. Try again.' });
+    }
+    tries.delete(req.ip);
     const sid = crypto.randomBytes(18).toString('hex');
-    sessions.add(sid);
+    sessions.set(sid, m.id);
     res.cookie('ts_staff', sid, { httpOnly: true, sameSite: 'lax', maxAge: 14 * 24 * 3600e3 });
-    res.json({ ok: true });
+    res.json({ ok: true, name: m.name, role: m.role });
   });
-  app.get('/api/me', (req, res) => res.json({ staff: isStaff(req) }));
+  app.post('/api/logout', (req, res) => { sessions.delete(req.cookies.ts_staff); res.clearCookie('ts_staff'); res.json({ ok: true }); });
+  app.get('/api/me', (req, res) => {
+    const m = memberOf(req.cookies.ts_staff);
+    res.json(m ? { staff: true, name: m.name, role: m.role, areas: ['floor', 'kitchen', 'owner', 'settings'].filter(a => team.can(m, a)) } : { staff: false });
+  });
 
   /* ---------- guest (QR) ---------- */
   app.get('/api/guest/:table', wrap(req => r.guestView(guestTable(req).id)));
@@ -77,19 +96,19 @@ function createApp({
   }));
 
   /* ---------- staff ---------- */
-  app.get('/api/staff', staffOnly, wrap(() => r.staffView()));
-  app.post('/api/alerts/:id/ack', staffOnly, wrap(req => r.ackAlert(req.params.id, req.body.by || 'staff')));
-  app.post('/api/tables/:table/clean', staffOnly, wrap(req => r.markClean(req.params.table)));
-  app.post('/api/tables/:table/seat', staffOnly, wrap(req => { const v = r.seat(r.table(req.params.table), Number(req.body.guests) || 2, 'staff'); r.changed(); return v; }));
-  app.post('/api/tables/:table/leave', staffOnly, wrap(req => { r.guestsLeft(r.table(req.params.table)); r.changed(); }));
-  app.post('/api/tables/:table/waiter', staffOnly, wrap(req => { r.waiterVisited(r.table(req.params.table)); r.changed(); }));
-  app.post('/api/tables/:table/order', staffOnly, wrap(req => r.placeOrder(req.params.table, req.body.items)));
-  app.post('/api/tables/:table/payments/:pid/confirm', staffOnly, wrap(req => r.confirmPayment(req.params.table, req.params.pid)));
-  app.post('/api/orders/:id/advance', staffOnly, wrap(req => r.advanceOrder(req.params.id, req.body.status)));
-  app.get('/api/stats', staffOnly, wrap(() => r.stats()));
-  app.put('/api/menu', staffOnly, wrap(req => r.setMenu(req.body.menu)));
+  app.get('/api/staff', need('kitchen'), wrap(() => r.staffView()));
+  app.post('/api/alerts/:id/ack', need('floor'), wrap(req => r.ackAlert(req.params.id, by(req))));
+  app.post('/api/tables/:table/clean', need('floor'), wrap(req => r.markClean(req.params.table, by(req))));
+  app.post('/api/tables/:table/seat', need('floor'), wrap(req => { const v = r.seat(r.table(req.params.table), Number(req.body.guests) || 2, 'staff'); r.changed(); return v; }));
+  app.post('/api/tables/:table/leave', need('floor'), wrap(req => { r.guestsLeft(r.table(req.params.table)); r.changed(); }));
+  app.post('/api/tables/:table/waiter', need('floor'), wrap(req => { r.waiterVisited(r.table(req.params.table), by(req)); r.changed(); }));
+  app.post('/api/tables/:table/order', need('floor'), wrap(req => r.placeOrder(req.params.table, req.body.items)));
+  app.post('/api/tables/:table/payments/:pid/confirm', need('floor'), wrap(req => r.confirmPayment(req.params.table, req.params.pid, by(req))));
+  app.post('/api/orders/:id/advance', need('kitchen'), wrap(req => r.advanceOrder(req.params.id, req.body.status, by(req))));
+  app.get('/api/stats', need('owner'), wrap(() => r.stats()));
+  app.put('/api/menu', need('settings'), wrap(req => r.setMenu(req.body.menu)));
   const PHOTO_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
-  app.post('/api/menu/photo', staffOnly, express.raw({ type: Object.keys(PHOTO_TYPES), limit: '3mb' }), wrap(req => {
+  app.post('/api/menu/photo', need('settings'), express.raw({ type: Object.keys(PHOTO_TYPES), limit: '3mb' }), wrap(req => {
     const ext = PHOTO_TYPES[req.get('content-type')];
     if (!ext || !Buffer.isBuffer(req.body) || !req.body.length) throw httpError(400, 'Choose a JPG, PNG or WebP photo under 3 MB.');
     const name = crypto.randomBytes(8).toString('hex') + '.' + ext;
@@ -97,8 +116,14 @@ function createApp({
     fs.writeFileSync(path.join(photoDir, name), req.body);
     return { url: '/photos/' + name };
   }));
-  app.put('/api/settings', staffOnly, wrap(req => r.updateSettings(req.body)));
-  app.get('/api/qr/:table.svg', staffOnly, async (req, res) => {
+  app.put('/api/settings', need('settings'), wrap(req => r.updateSettings(req.body)));
+  app.get('/api/team', need('settings'), wrap(() => team.publicList()));
+  app.put('/api/team', need('settings'), wrap(req => {
+    const list = team.save(req.body.staff);
+    for (const [sid, id] of sessions) if (!team.byId(id)) sessions.delete(sid); // removed or paused people are logged out
+    return list;
+  }));
+  app.get('/api/qr/:table.svg', need('settings'), async (req, res) => {
     try {
       const t = r.table(req.params.table);
       const base = publicUrl || `${req.protocol}://${req.get('host')}`;
@@ -123,7 +148,7 @@ function createApp({
   /* ---------- live updates ---------- */
   io.on('connection', socket => {
     const cookies = Object.fromEntries((socket.handshake.headers.cookie || '').split(';').map(c => c.trim().split('=').map(decodeURIComponent)));
-    if (sessions.has(cookies.ts_staff)) socket.join('staff');
+    if (memberOf(cookies.ts_staff)) socket.join('staff');
     const { table, k } = socket.handshake.auth || {};
     const t = table && r.d.tables.find(x => x.id === table);
     if (t && t.key === k) socket.join('table:' + t.id);
@@ -137,7 +162,7 @@ function createApp({
   const sweeper = setInterval(() => r.sweep(), 5000);
   server.on('close', () => { clearInterval(sweeper); store.flush(); });
 
-  return { app, server, io, restaurant: r, store };
+  return { app, server, io, restaurant: r, store, team };
 }
 
 if (require.main === module) {
@@ -146,7 +171,7 @@ if (require.main === module) {
   server.listen(port, () => {
     console.log(`TableSense running on http://localhost:${port}`);
     console.log(`Staff: /staff   Kitchen: /kitchen   Owner: /owner   QR codes: /qr`);
-    if (!process.env.STAFF_PIN) console.log('Staff PIN is 1234. Set STAFF_PIN to change it.');
+    if (!process.env.STAFF_PIN) console.log('First owner PIN is 1234 (set STAFF_PIN before first start to change it). Add staff on the Menu & settings page.');
   });
 }
 

@@ -14,13 +14,14 @@
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common.js"></script>
 <script>
+const w = TS.t();
 TS.staffGate(async () => {
   const d = await TS.api('/api/staff');
   document.getElementById('root').innerHTML = `${TS.nav('/qr')}
-    <p class="hint muted">Print this page and stick one code on each table. Each code only opens its own table. Open a code's link to test it.</p>
-    <div class="cards">${d.tables.map(t => `<div class="card"><img src="/api/qr/${t.id}.svg" alt="QR code for table ${TS.esc(t.id)}">
-      <div style="font-weight:600">Scan for menu · Table ${TS.esc(t.id.replace(/^T/, ''))}</div>
-      <a class="hint" href="/t/${t.id}?k=${t.key}" target="_blank">Open ${TS.esc(t.id)}</a></div>`).join('')}</div>`;
-});
+    <p class="hint muted">${w.qrHint}</p>
+    <div class="cards">${d.tables.map(t => `<div class="card"><img src="/api/qr/${t.id}.svg" alt="QR ${TS.esc(t.id)}">
+      <div style="font-weight:600">${w.scanFor(TS.esc(t.id.replace(/^T/, '')))}</div>
+      <a class="hint" href="/t/${t.id}?k=${t.key}" target="_blank">${w.openT(TS.esc(t.id))}</a></div>`).join('')}</div>`;
+}, 'settings');
 </script>
 </body></html>
