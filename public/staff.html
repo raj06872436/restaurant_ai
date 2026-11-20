@@ -28,7 +28,7 @@
 const { esc, money, api, toast, ago, time } = TS;
 const w = TS.t();
 const COLOR = { free: '--free', seated: '--seated', ordered: '--ordered', eating: '--eating', dirty: '--dirty' };
-const KIND = { waiting: ['--seated', 'onMyWay'], call: ['--saffron', 'onMyWay'], bill: ['--saffron', 'onMyWay'], clean: ['--dirty', 'cleaned'], ready: ['--ordered', 'served'], payment: ['--free', ''], unpaid: ['--dirty', 'checked'] };
+const KIND = { waiting: ['--seated', 'onMyWay'], call: ['--saffron', 'onMyWay'], bill: ['--saffron', 'onMyWay'], clean: ['--dirty', 'cleaned'], ready: ['--ordered', 'served'], payment: ['--free', ''], online: ['--free', ''], unpaid: ['--dirty', 'checked'] };
 let data, seenAlerts = new Set(), audio;
 
 function beep() {

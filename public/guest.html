@@ -48,10 +48,10 @@ const WORDS = {
     billLater: 'Your bill will show here after you order.', confirming: 'Payment sent. Staff are confirming it.', paid: 'Paid in full. Thank you!',
     totalTip: (t, tip) => `Total ${t}${tip ? `, tip ${tip}` : ''}.`, total: 'Total', already: 'Already paid', left: 'Left to pay',
     split: 'Split', whole: 'Whole bill', ways: n => `${n} ways`, tip: 'Tip', payWith: 'Pay with', share: 'Your share', toPay: 'To pay',
-    how: { cash: 'A waiter will come to collect it.', card: 'A waiter will bring the card machine.', upi: 'You will get a UPI link and QR code to pay from any UPI app.', bank: 'Staff will confirm when your transfer arrives.' },
+    how: { online: 'UPI, card, netbanking or wallet through Razorpay. Confirmed instantly.', cash: 'A waiter will come to collect it.', card: 'A waiter will bring the card machine.', upi: 'You will get a UPI link and QR code to pay from any UPI app.', bank: 'Staff will confirm when your transfer arrives.' },
     pay: a => `Pay ${a}`, waiterOnWay: 'A waiter is on the way.', sent: 'Order sent to the kitchen.',
-    collect: 'A waiter is coming to collect your payment.', noted: 'Payment noted. Staff will confirm it.',
-    cantOpen: "Can't open this table", methods: { cash: 'Cash', card: 'Card', upi: 'UPI', bank: 'Bank transfer' }, lang: 'हिंदी',
+    collect: 'A waiter is coming to collect your payment.', paidOnline: 'Paid. Thank you!', cantPay: 'Could not open online payment. Check your internet or pay another way.', cancelled: 'Payment cancelled. Nothing was charged.', noted: 'Payment noted. Staff will confirm it.',
+    cantOpen: "Can't open this table", methods: { online: 'Pay online', cash: 'Cash', card: 'Card', upi: 'UPI', bank: 'Bank transfer' }, lang: 'हिंदी',
   },
   hi: {
     table: 'टेबल', call: 'वेटर बुलाएं', coming: 'वेटर आ रहे हैं ✓', menu: 'मेन्यू', myOrder: 'मेरा ऑर्डर', bill: 'बिल और भुगतान',
@@ -64,10 +64,10 @@ const WORDS = {
     billLater: 'ऑर्डर के बाद आपका बिल यहाँ दिखेगा।', confirming: 'भुगतान भेजा गया। स्टाफ़ पुष्टि कर रहा है।', paid: 'पूरा भुगतान हो गया। धन्यवाद!',
     totalTip: (t, tip) => `कुल ${t}${tip ? `, टिप ${tip}` : ''}।`, total: 'कुल', already: 'पहले से भुगतान', left: 'बाकी भुगतान',
     split: 'बिल बाँटें', whole: 'पूरा बिल', ways: n => `${n} हिस्से`, tip: 'टिप', payWith: 'भुगतान का तरीका', share: 'आपका हिस्सा', toPay: 'भुगतान',
-    how: { cash: 'वेटर नकद लेने आएंगे।', card: 'वेटर कार्ड मशीन लाएंगे।', upi: 'आपको किसी भी UPI ऐप से भुगतान के लिए लिंक और QR कोड मिलेगा।', bank: 'ट्रांसफ़र मिलने पर स्टाफ़ पुष्टि करेगा।' },
+    how: { online: 'Razorpay से UPI, कार्ड, नेटबैंकिंग या वॉलेट। तुरंत पुष्टि।', cash: 'वेटर नकद लेने आएंगे।', card: 'वेटर कार्ड मशीन लाएंगे।', upi: 'आपको किसी भी UPI ऐप से भुगतान के लिए लिंक और QR कोड मिलेगा।', bank: 'ट्रांसफ़र मिलने पर स्टाफ़ पुष्टि करेगा।' },
     pay: a => `${a} भुगतान करें`, waiterOnWay: 'वेटर आ रहे हैं।', sent: 'ऑर्डर किचन भेज दिया गया।',
-    collect: 'वेटर भुगतान लेने आ रहे हैं।', noted: 'भुगतान दर्ज हुआ। स्टाफ़ पुष्टि करेगा।',
-    cantOpen: 'यह टेबल नहीं खुल सकी', methods: { cash: 'नकद', card: 'कार्ड', upi: 'UPI', bank: 'बैंक ट्रांसफ़र' }, lang: 'English',
+    collect: 'वेटर भुगतान लेने आ रहे हैं।', paidOnline: 'भुगतान हो गया। धन्यवाद!', cantPay: 'ऑनलाइन भुगतान नहीं खुला। इंटरनेट जाँचें या दूसरे तरीके से भुगतान करें।', cancelled: 'भुगतान रद्द हुआ। कोई पैसा नहीं कटा।', noted: 'भुगतान दर्ज हुआ। स्टाफ़ पुष्टि करेगा।',
+    cantOpen: 'यह टेबल नहीं खुल सकी', methods: { online: 'ऑनलाइन भुगतान', cash: 'नकद', card: 'कार्ड', upi: 'UPI', bank: 'बैंक ट्रांसफ़र' }, lang: 'English',
   },
 };
 let lang = 'en';
@@ -157,6 +157,32 @@ function render() {
   app.innerHTML = h;
 }
 
+// Razorpay's own checkout window (UPI apps, cards, netbanking). Loaded only when a guest pays online.
+function loadCheckoutScript() {
+  if (window.Razorpay) return Promise.resolve();
+  return new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js'; s.onload = ok; s.onerror = () => fail(new Error(W().cantPay));
+    document.head.appendChild(s);
+  });
+}
+async function openCheckout(o) {
+  await loadCheckoutScript();
+  await new Promise(done => {
+    const rz = new window.Razorpay({
+      key: o.key, order_id: o.orderId, amount: o.amount, currency: o.currency, name: o.name, description: o.description,
+      theme: { color: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#0f6b5c' },
+      handler: async resp => {
+        try { await api(`/api/guest/${tableId}/razorpay/verify`, { headers: H, body: resp }); toast(W().paidOnline); }
+        catch (err) { toast(err.message); }
+        done();
+      },
+      modal: { ondismiss: () => { toast(W().cancelled); done(); } },
+    });
+    rz.on('payment.failed', r => toast((r.error && r.error.description) || W().cancelled));
+    rz.open();
+  });
+}
 document.addEventListener('input', e => { if (e.target.dataset.note) notes[e.target.dataset.note] = e.target.value; });
 document.addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b || busy) return;
@@ -182,7 +208,8 @@ document.addEventListener('click', async e => {
       busy = true; render();
       const share = shareOf(view.bill);
       const res = await api(`/api/guest/${tableId}/pay`, { headers: H, body: { amount: share, tip: Math.round(share * tip / 100), method } });
-      if (res.payment.upiLink) upi = { pid: res.payment.id, link: res.payment.upiLink, total: res.payment.amount + res.payment.tip };
+      if (res.razorpay) { busy = false; await openCheckout(res.razorpay); }
+      else if (res.payment.upiLink) upi = { pid: res.payment.id, link: res.payment.upiLink, total: res.payment.amount + res.payment.tip };
       else toast(method === 'cash' || method === 'card' ? w.collect : w.noted);
     }
   } catch (err) { toast(err.message); }
