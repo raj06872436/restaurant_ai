@@ -83,8 +83,14 @@ class Restaurant extends EventEmitter {
   }
   guestsLeft(t) {
     const v = this.visit(t.visitId);
-    if (v) v.leftAt = this.now();
     t.visitId = null; t.people = 0;
+    // Joined tables share one bill: the bill stays open until the last of them is empty.
+    if (v && this.d.tables.some(x => x.visitId === v.id)) {
+      this.setState(t, 'dirty');
+      this.raise(t.id, 'clean', `Guests left ${t.id}. Clean and reset the table.`, 'camera');
+      return;
+    }
+    if (v) v.leftAt = this.now();
     this.resolve(t.id, ['waiting', 'call', 'ready', 'bill']);
     const unpaid = v && this.billFor(v).due > 0;
     this.setState(t, 'dirty');
@@ -138,7 +144,11 @@ class Restaurant extends EventEmitter {
   }
   billFor(v) {
     const orders = this.d.orders.filter(o => o.visitId === v.id && o.status !== 'cancelled');
-    const total = orders.reduce((a, o) => a + o.total, 0);
+    const subtotal = orders.reduce((a, o) => a + o.total, 0);
+    const d = v.discount;
+    const discount = !d ? 0 : Math.min(subtotal, Math.round(d.type === 'pct' ? subtotal * d.value / 100 : d.value));
+    const tax = this.taxFor(subtotal - discount);
+    const total = subtotal - discount + tax.added;
     const paid = v.payments.reduce((a, p) => a + p.amount, 0);
     const tips = v.payments.reduce((a, p) => a + (p.tip || 0), 0);
     const lines = {};
@@ -147,7 +157,7 @@ class Restaurant extends EventEmitter {
       lines[l.id].qty += l.qty;
     }
     const unconfirmed = v.payments.filter(p => !p.confirmed).reduce((a, p) => a + p.amount + (p.tip || 0), 0);
-    return { total, paid, tips, unconfirmed, due: Math.max(0, total - paid), lines: Object.values(lines) };
+    return { subtotal, discount, discountInfo: d || null, tax, total, paid, tips, unconfirmed, due: Math.max(0, total - paid), lines: Object.values(lines) };
   }
   pay(tableId, { amount, tip = 0, method }) {
     const t = this.table(tableId);
@@ -197,6 +207,19 @@ class Restaurant extends EventEmitter {
     if ('name' in patch) { if (!text(patch.name)) throw httpError(400, 'Enter the restaurant name.'); s.name = text(patch.name); }
     if ('currency' in patch) s.currency = text(patch.currency, 5) || 'Rs';
     if (patch.wifi) s.wifi = { network: text(patch.wifi.network), password: text(patch.wifi.password) };
+    if (patch.gst) {
+      const rate = Number(patch.gst.rate) || 0;
+      if (![0, 5, 12, 18, 28].includes(rate)) throw httpError(400, 'GST rate must be 0, 5, 12, 18 or 28%.');
+      const gstin = text(patch.gst.gstin, 15).toUpperCase();
+      if (gstin && !/^[0-9]{2}[A-Z0-9]{13}$/.test(gstin)) throw httpError(400, 'GSTIN should be 15 letters and numbers.');
+      s.gst = { rate, inclusive: !!patch.gst.inclusive, gstin };
+    }
+    if ('waiterDiscountMaxPct' in patch) {
+      const n = Number(patch.waiterDiscountMaxPct);
+      if (!(n >= 0 && n <= 100)) throw httpError(400, 'Waiter discount limit must be between 0 and 100%.');
+      s.waiterDiscountMaxPct = n;
+    }
+    if ('address' in patch) s.address = text(patch.address, 140);
     if ('noOrderAlertMin' in patch) s.noOrderAlertMin = mins(patch.noOrderAlertMin, 'The no-order alert');
     if ('readyNotServedAlertMin' in patch) s.readyNotServedAlertMin = mins(patch.readyNotServedAlertMin, 'The food-ready alert');
     if (patch.payments) {
@@ -243,6 +266,91 @@ class Restaurant extends EventEmitter {
     });
     this.changed();
     return this.d.menu;
+  }
+
+  /* ---------- table moves, joined bills, cancellations, discounts ---------- */
+  moveTable(fromId, toId, by = 'staff') {
+    const from = this.table(fromId), to = this.table(toId);
+    const v = this.visit(from.visitId);
+    if (!v) throw httpError(400, `${from.id} has no guests to move.`);
+    if (from.id === to.id) throw httpError(400, 'Pick a different table.');
+    if (to.visitId) throw httpError(400, `${to.id} already has guests. Join the bills instead.`);
+    to.visitId = v.id; to.people = from.people; this.setState(to, from.state);
+    v.tableId = to.id; v.moves = [...(v.moves || []), { from: from.id, to: to.id, by, at: this.now() }];
+    for (const o of this.d.orders) if (o.visitId === v.id && ['new', 'cooking', 'ready'].includes(o.status)) o.tableId = to.id;
+    for (const a of this.d.alerts) if (!a.doneAt && a.tableId === from.id && a.kind !== 'clean') a.tableId = to.id;
+    this.resolve(to.id, ['clean'], by);
+    from.visitId = null; from.people = 0;
+    this.setState(from, 'dirty');
+    this.raise(from.id, 'clean', `Guests moved from ${from.id} to ${to.id}. Clean and reset ${from.id}.`, 'staff', { to: to.id });
+    this.changed();
+    return v;
+  }
+  joinTables(fromId, intoId, by = 'staff') {
+    const from = this.table(fromId), into = this.table(intoId);
+    const a = this.visit(from.visitId), b = this.visit(into.visitId);
+    if (!a || !b) throw httpError(400, 'Both tables need guests to join their bills.');
+    if (a.id === b.id) throw httpError(400, 'These tables already share a bill.');
+    for (const o of this.d.orders) if (o.visitId === a.id) o.visitId = b.id;
+    b.payments.push(...a.payments); a.payments = [];
+    b.guests += a.guests;
+    b.scannedAt = b.scannedAt || a.scannedAt;
+    b.firstOrderAt = [a.firstOrderAt, b.firstOrderAt].filter(Boolean).sort()[0] || null;
+    b.joined = [...(b.joined || []), { table: from.id, by, at: this.now() }];
+    Object.assign(a, { mergedInto: b.id, leftAt: this.now(), guests: 0 });
+    for (const t of this.d.tables) if (t.visitId === a.id) t.visitId = b.id;
+    this.changed();
+    return b;
+  }
+  cancelItem(orderId, itemId, qty, reason, by = 'staff') {
+    const o = this.d.orders.find(x => x.id === orderId);
+    if (!o || o.status === 'cancelled') throw httpError(404, 'Order not found');
+    const line = o.lines.find(l => l.id === itemId);
+    if (!line) throw httpError(404, 'That dish is not in this order.');
+    reason = String(reason || '').trim().slice(0, 100);
+    if (!reason) throw httpError(400, 'Give a reason for cancelling.');
+    qty = Math.min(line.qty, Math.max(1, Number(qty) || line.qty));
+    const v = this.visit(o.visitId);
+    const before = v ? this.billFor(v) : null;
+    line.qty -= qty;
+    o.total = o.lines.reduce((a, l) => a + l.price * l.qty, 0);
+    if (v && this.billFor(v).total < before.paid) { line.qty += qty; o.total = o.lines.reduce((a, l) => a + l.price * l.qty, 0); throw httpError(400, 'This bill is already paid. Refund the guest instead of cancelling.'); }
+    o.cancelled = [...(o.cancelled || []), { id: line.id, name: line.name, qty, price: line.price, reason, by, at: this.now() }];
+    o.lines = o.lines.filter(l => l.qty > 0);
+    if (!o.lines.length) { o.status = 'cancelled'; o.servedAt = this.now(); }
+    const t = this.d.tables.find(x => x.id === o.tableId);
+    if (t && t.visitId) {
+      const open = this.d.orders.some(x => x.visitId === t.visitId && ['new', 'cooking', 'ready'].includes(x.status));
+      if (!open) { this.resolve(t.id, ['ready']); if (t.state === 'ordered') this.setState(t, this.d.orders.some(x => x.visitId === t.visitId && x.status === 'served') ? 'eating' : 'seated'); }
+    }
+    this.changed();
+    return o;
+  }
+  setDiscount(tableId, { type, value, reason }, member = { name: 'staff', role: 'owner' }) {
+    const v = this.currentVisit(tableId);
+    if (!v) throw httpError(400, 'There is no open bill for this table.');
+    if (type === 'none') { delete v.discount; this.changed(); return this.billFor(v); }
+    value = Number(value);
+    if (!['pct', 'amt'].includes(type) || !(value > 0)) throw httpError(400, 'Enter a discount.');
+    if (type === 'pct' && value > 100) throw httpError(400, 'A discount can be at most 100%.');
+    const subtotal = this.billFor({ ...v, discount: null }).subtotal;
+    const pct = type === 'pct' ? value : (value / Math.max(1, subtotal)) * 100;
+    const limit = this.d.settings.waiterDiscountMaxPct ?? 10;
+    if (member.role !== 'owner' && pct > limit) throw httpError(403, `Waiters can give up to ${limit}% off. Ask the owner for more.`);
+    reason = String(reason || '').trim().slice(0, 100);
+    if (!reason) throw httpError(400, 'Give a reason for the discount.');
+    v.discount = { type, value, reason, by: member.name, at: this.now() };
+    if (this.billFor(v).total < this.billFor(v).paid) { delete v.discount; throw httpError(400, 'This bill is already paid. Refund the guest instead.'); }
+    this.changed();
+    return this.billFor(v);
+  }
+  // GST: either added on top of menu prices, or already inside them (shown as a split on the bill).
+  taxFor(amount) {
+    const g = this.d.settings.gst || {};
+    const rate = Number(g.rate) || 0;
+    if (!rate) return { rate: 0, amount: 0, added: 0, inclusive: false };
+    const amt = g.inclusive ? Math.round(amount - amount / (1 + rate / 100)) : Math.round(amount * rate / 100);
+    return { rate, amount: amt, added: g.inclusive ? 0 : amt, inclusive: !!g.inclusive, gstin: g.gstin || '' };
   }
 
   /* ---------- kitchen ---------- */
@@ -341,7 +449,9 @@ class Restaurant extends EventEmitter {
       date: localDate(start),
       sales: confirmed.reduce((a, p) => a + p.amount, 0), tips: confirmed.reduce((a, p) => a + (p.tip || 0), 0),
       unconfirmed: payments.filter(p => !p.confirmed).reduce((a, p) => a + p.amount + (p.tip || 0), 0),
-      ordered: orders.reduce((a, o) => a + o.total, 0), orders: orders.length, visits: visits.length, guests: visits.reduce((a, v) => a + v.guests, 0),
+      ordered: orders.reduce((a, o) => a + o.total, 0), orders: orders.length,
+      discounts: visits.filter(v => v.discount).map(v => ({ tableId: v.tableId, amount: this.billFor(v).discount, reason: v.discount.reason, by: v.discount.by })),
+      cancelled: this.d.orders.filter(o => inDay(o.at)).flatMap(o => (o.cancelled || []).map(c => ({ tableId: o.tableId, name: c.name, qty: c.qty, amount: c.qty * c.price, reason: c.reason, by: c.by }))), visits: visits.length, guests: visits.reduce((a, v) => a + v.guests, 0),
       walkouts: this.d.alerts.filter(a => inDay(a.at) && a.kind === 'unpaid').map(a => ({ tableId: a.tableId, amount: (a.params || {}).amount || 0 })),
       byMethod: Object.values(byMethod).sort((a, b) => b.amount - a.amount),
       dishes: Object.values(dishes).sort((a, b) => b.revenue - a.revenue),
@@ -358,6 +468,8 @@ class Restaurant extends EventEmitter {
       ['Payments by method', 'Count', `Amount (${cur})`, `Tips (${cur})`], ...r.byMethod.map(m => [m.method, m.count, m.amount, m.tips]), [],
       ['Dish', 'Quantity', `Revenue (${cur})`], ...r.dishes.map(d => [d.name, d.qty, d.revenue]), [],
       ['Hour', 'Guests', 'Orders', `Ordered (${cur})`], ...r.hours.map(h => [`${String(h.hour).padStart(2, '0')}:00`, h.guests, h.orders, h.ordered]), [],
+      ['Discounts', 'Table', `Amount (${cur})`, 'Reason', 'By'], ...r.discounts.map(d => ['', d.tableId, d.amount, d.reason, d.by]), [],
+      ['Cancelled', 'Table', 'Qty', `Amount (${cur})`, 'Reason', 'By'], ...r.cancelled.map(c => [c.name, c.tableId, c.qty, c.amount, c.reason, c.by]), [],
       ['Staff', 'Alerts handled', 'Avg. minutes to respond', 'Payments confirmed', 'Orders served'], ...r.team.map(t => [t.name, t.alerts, t.avgResponseMin ?? '', t.payments, t.served])];
     return rows.map(row => row.map(q).join(',')).join('\r\n') + '\r\n';
   }

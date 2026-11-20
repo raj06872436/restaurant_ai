@@ -18,10 +18,16 @@
 .alerts{display:grid;gap:8px}
 .alert{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px;border-radius:10px;border:1px solid var(--line);border-left:4px solid var(--c);font-size:.9rem}
 .alert.done{opacity:.5}
+.tbl .acts a{text-decoration:none}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--fg);padding:18px;width:min(380px,calc(100vw - 32px))}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog form{display:grid;gap:10px}
+dialog select,dialog input{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg)}
 .src{font-family:var(--f-mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 </style></head>
 <body>
 <div class="wrap" id="root"></div>
+<dialog id="sheet"></dialog>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common.js"></script>
 <script>
@@ -50,12 +56,16 @@ function render() {
     const acts = [];
     if (t.state === 'free') acts.push(`<button data-seat="${t.id}">${w.seatGuests}</button>`);
     if (v && !v.waiterAt) acts.push(`<button data-waiter="${t.id}">${w.markWaiter}</button>`);
+    if (v) acts.push(`<button data-sheet="move" data-t="${t.id}">${w.move}</button>`, `<button data-sheet="join" data-t="${t.id}">${w.join}</button>`,
+      `<button data-sheet="discount" data-t="${t.id}">${w.discount}</button>`, `<a href="/print/bill/${t.id}" target="_blank"><button>${w.printBill}</button></a>`);
     if (v) acts.push(`<button data-leave="${t.id}">${w.guestsLeft}</button>`);
     if (t.state === 'dirty') acts.push(`<button data-clean="${t.id}">${w.cleaned}</button>`);
     return `<div class="tbl ${alarm ? 'alarm' : ''}" style="--c:var(${COLOR[t.state]})">
       <div class="row"><b>${esc(t.id)}</b><span>${v ? w.guests(v.guests) : w.seats(t.seats)}</span></div>
       <span class="st">${w.state[t.state]}</span><span>${ago(t.since)}</span>
       ${v ? `<span>${v.waiterAt ? w.waiterVisited : w.noWaiter}${v.scannedAt ? ' · ' + w.qrScanned : ''}</span>` : ''}
+      ${v && data.tables.some(x => x.id !== t.id && x.visitId === t.visitId) ? `<span>${w.sharedWith(data.tables.filter(x => x.id !== t.id && x.visitId === t.visitId).map(x => x.id).join(', '))}</span>` : ''}
+      ${t.bill && t.bill.discount ? `<span>− ${money(t.bill.discount)} (${esc(t.bill.discountInfo.reason)})</span>` : ''}
       ${t.bill && t.bill.total ? `<span>${t.bill.due ? w.billDue(money(t.bill.total), money(t.bill.due)) : w.billPaid(money(t.bill.total))}</span>` : ''}
       <div class="acts">${acts.join('')}</div></div>`;
   }).join('');
@@ -79,9 +89,42 @@ function render() {
         <div class="alerts">${alerts || `<div class="empty">${w.noAlerts}</div>`}</div></section>
     </div>`;
 }
+// Small forms for move / join / discount, shown in a dialog over the floor map.
+function openSheet(kind, id) {
+  const t = data.tables.find(x => x.id === id), sheet = document.getElementById('sheet');
+  let body = '';
+  if (kind === 'move') {
+    const free = data.tables.filter(x => !x.visitId && x.id !== id);
+    body = `<h3>${w.moveTo(esc(id))}</h3>${free.length ? `<select name="to">${free.map(x => `<option>${esc(x.id)}</option>`).join('')}</select><button class="primary">${w.move}</button>` : `<p class="muted">${w.noFree}</p>`}`;
+  } else if (kind === 'join') {
+    const other = data.tables.filter(x => x.visitId && x.visitId !== t.visitId);
+    body = `<h3>${w.joinInto(esc(id))}</h3>${other.length ? `<select name="into">${other.map(x => `<option>${esc(x.id)}</option>`).join('')}</select><button class="primary">${w.join}</button>` : `<p class="muted">${w.noOther}</p>`}`;
+  } else {
+    const cur = t.bill && t.bill.discountInfo;
+    body = `<h3>${w.discFor(esc(id))}</h3><div class="row"><input name="value" type="number" min="1" step="1" required value="${cur ? cur.value : ''}" aria-label="${w.discount}">
+      <select name="type"><option value="pct" ${!cur || cur.type === 'pct' ? 'selected' : ''}>${w.pctOff}</option><option value="amt" ${cur && cur.type === 'amt' ? 'selected' : ''}>${w.amtOff}</option></select></div>
+      <label>${w.reasonL}<input name="reason" type="text" maxlength="100" required value="${esc(cur ? cur.reason : '')}"></label><button class="primary">${w.apply}</button>
+      ${cur ? `<button type="button" data-nodisc="${esc(id)}">${w.removeDisc}</button>` : ''}`;
+  }
+  sheet.innerHTML = `<form method="dialog" data-kind="${kind}" data-t="${esc(id)}">${body}<div class="err" id="sheet-err"></div><button type="button" data-closesheet>${w.close}</button></form>`;
+  sheet.showModal();
+}
+document.getElementById('sheet').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target, id = f.dataset.t, val = n => f.elements[n] && f.elements[n].value;
+  try {
+    if (f.dataset.kind === 'move') { await api(`/api/tables/${id}/move`, { body: { to: val('to') } }); toast(w.moved(id, val('to'))); }
+    if (f.dataset.kind === 'join') { await api(`/api/tables/${id}/join`, { body: { into: val('into') } }); toast(w.joined); }
+    if (f.dataset.kind === 'discount') { await api(`/api/tables/${id}/discount`, { body: { type: val('type'), value: Number(val('value')), reason: val('reason') } }); toast(w.discSaved); }
+    document.getElementById('sheet').close(); await load();
+  } catch (err) { document.getElementById('sheet-err').textContent = err.message; }
+});
 document.addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b || b.dataset.ts) return;
   const d = b.dataset;
+  if (d.sheet) return openSheet(d.sheet, d.t);
+  if ('closesheet' in d) return document.getElementById('sheet').close();
+  if (d.nodisc) { try { await api(`/api/tables/${d.nodisc}/discount`, { body: { type: 'none' } }); document.getElementById('sheet').close(); await load(); } catch (err) { toast(err.message); } return; }
   try {
     if (d.ack) await api(`/api/alerts/${d.ack}/ack`, { body: {} });
     if (d.seat) await api(`/api/tables/${d.seat}/seat`, { body: { guests: 2 } });
