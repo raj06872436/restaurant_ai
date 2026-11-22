@@ -1,3 +1,5 @@
+<p align="center"><a href="https://github.com/raj06872436"><img src=".github/cover.svg" width="100%" alt="TableSense" /></a></p>
+
 # TableSense
 
 One system for a restaurant that joins two ideas:
